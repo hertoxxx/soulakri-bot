@@ -8,15 +8,15 @@
 const CONFIG = {
   // IDs à récupérer dans Discord (clic droit → Copier l'identifiant)
   // Active le "Mode développeur" dans Paramètres > Avancés > Mode développeur
-  GUILD_ID:           "TON_ID_SERVEUR",          // ID de ton serveur Discord
-  CHANNEL_REGLEMENT:  "ID_SALON_REGLEMENT",       // ID du salon #règlement
-  CHANNEL_BIENVENUE:  "ID_SALON_GENERAL",         // ID du salon #général (pour le message d'accueil)
-  ROLE_JOUEUR:        "ID_ROLE_JOUEUR",           // ID du rôle Joueur
-  ROLE_NON_VERIFIE:   "ID_ROLE_NON_VERIFIE",      // ID du rôle Non-vérifié
+  GUILD_ID:           "1487136081152577556",          
+  CHANNEL_REGLEMENT:  "1487136083627086010",      
+  CHANNEL_BIENVENUE:  "1487136083627086009",       
+  ROLE_JOUEUR:        "1489335006290776174",           
+  ROLE_NON_VERIFIE:   "1489335084568936498",     
 
   // Infos du serveur Minecraft
-  MC_IP:   "play.soulakri.fr",   // Remplace par ta vraie IP
-  MC_PORT: "25565",              // Port par défaut, change si besoin
+  MC_IP:   "soulakri.falix.gg",   
+  MC_PORT: "23932",              
 
   // Style des embeds
   COLOR_BLUE: 0x5DADE2,
@@ -24,7 +24,7 @@ const CONFIG = {
   COLOR_RED:  0xE74C3C,
   COLOR_GREEN:0x2ECC71,
   FOOTER:     "Soulakri • Survie & Fun Crossplay",
-  THUMBNAIL:  "https://i.imgur.com/REMPLACE_PAR_TON_LOGO.png", // URL de ton logo
+  THUMBNAIL:  "https://www.noelshack.com/2026-14-4-1775156368-t-l-chargement.png", 
 };
 
 // ============================================================
