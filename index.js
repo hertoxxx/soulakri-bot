@@ -6,17 +6,17 @@
 // ============================================================
 
 const CONFIG = {
-  GUILD_ID:           "TON_ID_SERVEUR",
-  CHANNEL_REGLEMENT:  "ID_SALON_REGLEMENT",
-  CHANNEL_BIENVENUE:  "ID_SALON_GENERAL",
-  CHANNEL_LOGS:       "ID_SALON_LOGS",
-  ROLE_JOUEUR:        "ID_ROLE_JOUEUR",
-  ROLE_NON_VERIFIE:   "ID_ROLE_NON_VERIFIE",
-  ROLE_ADMIN:         "ID_ROLE_ADMIN",
-  ROLE_MOD:           "ID_ROLE_MOD",
+  GUILD_ID:           "1487136081152577556",
+  CHANNEL_REGLEMENT:  "1487136083627086010",
+  CHANNEL_BIENVENUE:  "1487136083627086009",
+  CHANNEL_LOGS:       "1487136083132284951",       
+  ROLE_JOUEUR:        "1489335006290776174",
+  ROLE_NON_VERIFIE:   "1489335084568936498",
+  ROLE_ADMIN:         "1487136081198448730",       
+  ROLE_MOD:           "1487136081198448729",          
 
-  MC_IP:   "play.soulakri.fr",
-  MC_PORT: "25565",
+  MC_IP:   "soulakri.falix.gg",
+  MC_PORT: "23932",
 
   // Couleurs par contexte
   COLOR_BLUE:   0x5DADE2,
@@ -272,7 +272,6 @@ client.on("guildMemberAdd", async (member) => {
       .setFooter({ text: CONFIG.FOOTER })
       .setTimestamp();
 
-    // Boutons d'accueil
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("show_ip")
@@ -286,7 +285,6 @@ client.on("guildMemberAdd", async (member) => {
 
     await channel.send({ embeds: [embed], components: [row] });
 
-    // Log
     logAction(member.guild, {
       title: "📥 Nouveau membre",
       description: `**${member.user.tag}** a rejoint le serveur`,
@@ -356,7 +354,6 @@ client.on("interactionCreate", async (interaction) => {
 
   // ── BOUTONS ────────────────────────────────────────────────
 
-  // Bouton J'accepte le règlement
   if (interaction.isButton() && interaction.customId === "accept_rules") {
     try {
       const member = interaction.member;
@@ -395,7 +392,6 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  // Bouton IP depuis le message de bienvenue
   if (interaction.isButton() && interaction.customId === "show_ip") {
     const embed = new EmbedBuilder()
       .setColor(CONFIG.COLOR_GOLD)
@@ -408,7 +404,6 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply({ embeds: [embed], ephemeral: true });
   }
 
-  // Bouton lien règlement
   if (interaction.isButton() && interaction.customId === "show_reglement_link") {
     return interaction.reply({
       content: `📜 Le règlement est ici : <#${CONFIG.CHANNEL_REGLEMENT}>`,
@@ -416,7 +411,6 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
-  // Bouton fermer ticket
   if (interaction.isButton() && interaction.customId === "close_ticket") {
     try {
       await interaction.reply({ content: "🔒 Fermeture du ticket dans 5 secondes..." });
@@ -563,14 +557,12 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.deferReply();
 
     try {
-      // Récupère l'UUID depuis l'API Mojang
       const uuidRes = await fetch(`https://api.mojang.com/users/profiles/minecraft/${pseudo}`);
       if (!uuidRes.ok) {
         return interaction.editReply({ content: `❌ Joueur **${pseudo}** introuvable. Vérifie le pseudo.` });
       }
       const { id: uuid, name } = await uuidRes.json();
 
-      // Récupère le skin
       const skinUrl = `https://mc-heads.net/avatar/${uuid}/64`;
       const bodyUrl = `https://mc-heads.net/body/${uuid}/128`;
 
