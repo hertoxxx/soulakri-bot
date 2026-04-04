@@ -189,18 +189,7 @@ function generateMathQuestion() {
 // ============================================================
 
 const PHOENIX_GIFS = [
-  "https://media.tenor.com/Wd3ypqFhbKcAAAAd/valorant-phoenix.gif",
-  "https://media.tenor.com/6Y3pxLqFvVQAAAAd/valorant-phoenix.gif",
-  "https://media.tenor.com/4ZfmDqzTR3IAAAAd/phoenix-valorant-flash.gif",
-  "https://media.tenor.com/oVF6NREP5LIAAAAd/valorant-phoenix.gif",
-  "https://media.tenor.com/M1lkgzBNb7YAAAAd/phoenix-flash-valorant.gif",
-];
-const PHOENIX_PHRASES = [
-  "FLASH OUT ! T'as rien vu 🔥",
-  "Run it back ! Phoenix est en feu 🔥",
-  "Come on, lemme cook ! 🔥",
-  "Aveugle ! Personne ne peut m'arrêter 🔥",
-  "Hot hands, what can I say ? 🔥",
+  "https://i.imgur.com/FLkhWWO.gif",
 ];
 
 // ============================================================
@@ -208,10 +197,6 @@ const PHOENIX_PHRASES = [
 // ============================================================
 
 const blagues = [
-  { joke: "Pourquoi les plongeurs plongent toujours en arrière ?", answer: "Parce que sinon ils tomberaient dans le bateau ! 😂" },
-  { joke: "Qu'est-ce qu'un canif ?", answer: "Le petit fils du caniche ! 🐩" },
-  { joke: "Quel est le comble pour un électricien ?", answer: "De ne pas être au courant ! ⚡" },
-  { joke: "Qu'est-ce qu'un Minecraft sans creeper ?", answer: "Une thérapie ! 💚" },
   { joke: "Pourquoi Creeper est toujours seul ?", answer: "Parce qu'il fait exploser toutes ses relations ! 💥" },
   { joke: "Comment s'appelle un joueur Minecraft qui pleure ?", answer: "Un mineur en larmes ! ⛏️" },
   { joke: "Quel est le sport préféré des Endermen ?", answer: "La téléportation marathon ! 🏃" },
