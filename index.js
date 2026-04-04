@@ -803,13 +803,11 @@ client.on("interactionCreate", async (interaction) => {
 
   // /soules
   if (interaction.commandName === "soules") {
-    const gif = PHOENIX_GIFS[Math.floor(Math.random() * PHOENIX_GIFS.length)];
-    const phrase = PHOENIX_PHRASES[Math.floor(Math.random() * PHOENIX_PHRASES.length)];
     const embed = new EmbedBuilder()
       .setColor(0xFF6600)
-      .setTitle(`🔥 ${phrase}`)
-      .setDescription(`${interaction.user.toString()} balance une **flash** ! 🌟`)
-      .setImage(gif)
+      .setTitle("🔥 FLASH OUT ! Phoenix balance une flash !")
+      .setDescription(`${interaction.user.toString()} invoque **Phoenix** ! 🌟\n*Run it back !*`)
+      .setImage("https://i.imgur.com/FLkhWWO.gif")
       .setFooter({ text: CONFIG.FOOTER, iconURL: CONFIG.LOGO_URL })
       .setTimestamp();
     return interaction.reply({ embeds: [embed] });
