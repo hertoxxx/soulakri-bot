@@ -189,11 +189,11 @@ function generateMathQuestion() {
 // ============================================================
 
 const PHOENIX_GIFS = [
-  "https://media.tenor.com/Wd3ypqFhbKcAAAAC/phoenix-valorant.gif",
-  "https://media.tenor.com/6Y3pxLqFvVQAAAAC/valorant-phoenix.gif",
-  "https://media.tenor.com/4ZfmDqzTR3IAAAAC/phoenix-valorant-flash.gif",
-  "https://media.tenor.com/M1lkgzBNb7YAAAAC/phoenix-flash-valorant.gif",
-  "https://media.tenor.com/oVF6NREP5LIAAAAC/valorant-phoenix.gif",
+  "https://media.tenor.com/Wd3ypqFhbKcAAAAd/valorant-phoenix.gif",
+  "https://media.tenor.com/6Y3pxLqFvVQAAAAd/valorant-phoenix.gif",
+  "https://media.tenor.com/4ZfmDqzTR3IAAAAd/phoenix-valorant-flash.gif",
+  "https://media.tenor.com/oVF6NREP5LIAAAAd/valorant-phoenix.gif",
+  "https://media.tenor.com/M1lkgzBNb7YAAAAd/phoenix-flash-valorant.gif",
 ];
 const PHOENIX_PHRASES = [
   "FLASH OUT ! T'as rien vu 🔥",
@@ -822,11 +822,11 @@ client.on("interactionCreate", async (interaction) => {
     const phrase = PHOENIX_PHRASES[Math.floor(Math.random() * PHOENIX_PHRASES.length)];
     const embed = new EmbedBuilder()
       .setColor(0xFF6600)
-      .setAuthor({ name: "Phoenix — Valorant", iconURL: CONFIG.LOGO_URL })
       .setTitle(`🔥 ${phrase}`)
-      .setDescription(`${interaction.user.toString()} invoque **Phoenix** qui balance une **flash** ! 🌟\n*Run it back !*`)
+      .setDescription(`${interaction.user.toString()} balance une **flash** ! 🌟`)
       .setImage(gif)
-      .setFooter({ text: CONFIG.FOOTER + " • Valorant x Soulakri", iconURL: CONFIG.LOGO_URL }).setTimestamp();
+      .setFooter({ text: CONFIG.FOOTER, iconURL: CONFIG.LOGO_URL })
+      .setTimestamp();
     return interaction.reply({ embeds: [embed] });
   }
 
