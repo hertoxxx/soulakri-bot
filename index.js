@@ -1,7 +1,5 @@
 // ============================================================
 //  SOULAKRI BOT v5 — discord.js v14
-//  Nouvelles features : /giry /67 /cassandre /config /sondage
-//  /giveaway /warn /infractions /clear /userinfo /avatar /ping
 // ============================================================
 
 const CONFIG = {
