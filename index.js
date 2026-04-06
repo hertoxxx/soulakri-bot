@@ -1,9 +1,12 @@
 // ============================================================
-//  SOULAKRI BOT v5 — discord.js v14
+//  SOULAKRI BOT v6 — discord.js v14
+//  + RCON Minecraft + /meteo /rappel /objectif /ratio /joueurs /sondage
+//  + Commandes MC depuis Discord : /mc-say /mc-give /mc-tp /mc-time /mc-weather
 // ============================================================
 
 require("dotenv").config();
 const fs   = require("fs");
+const { Rcon } = require("rcon-client");
 const {
   Client, GatewayIntentBits, Partials,
   EmbedBuilder, ButtonBuilder, ButtonStyle,
@@ -36,8 +39,11 @@ const C = {
   ROLE_NOTIFS:      "1489910094287077466",
 
   // Minecraft
-  MC_IP:   "soulakri.falix.gg",
-  MC_PORT: "22608",
+  MC_IP:        "soulakri.falix.gg",
+  MC_PORT:      "22608",
+  RCON_HOST:    "soulakri.falix.gg",  // même IP que le serveur
+  RCON_PORT:    25575,                 // port RCON (server.properties)
+  RCON_PASS:    process.env.RCON_PASSWORD || "changeme",
 
   // Branding
   LOGO_URL: "https://i.imgur.com/igybOpU.png",
@@ -278,8 +284,39 @@ function startVittelBot() {
 }
 
 // ============================================================
-//  BLAGUES
+//  RCON — helper pour envoyer des commandes au serveur MC
 // ============================================================
+
+async function rconExec(command) {
+  const rcon = new Rcon({
+    host: C.RCON_HOST,
+    port: C.RCON_PORT,
+    password: C.RCON_PASS,
+    timeout: 5000,
+  });
+  try {
+    await rcon.connect();
+    const response = await rcon.send(command);
+    await rcon.end();
+    return { ok: true, response: response || "(commande exécutée)" };
+  } catch (err) {
+    try { await rcon.end(); } catch {}
+    return { ok: false, error: err.message };
+  }
+}
+
+// ============================================================
+//  OBJECTIF — stockage fichier
+// ============================================================
+
+const OBJECTIF_FILE = "./objectif.json";
+function loadObjectif() {
+  if (!fs.existsSync(OBJECTIF_FILE)) return { texte: "Aucun objectif défini pour l'instant.", updatedBy: null, updatedAt: null };
+  try { return JSON.parse(fs.readFileSync(OBJECTIF_FILE, "utf8")); } catch { return { texte: "Aucun objectif défini.", updatedBy: null, updatedAt: null }; }
+}
+function saveObjectif(data) { fs.writeFileSync(OBJECTIF_FILE, JSON.stringify(data, null, 2)); }
+
+
 
 const BLAGUES = [
   { joke: "Pourquoi Creeper est toujours seul ?",          answer: "Parce qu'il fait exploser toutes ses relations ! 💥" },
@@ -312,6 +349,54 @@ const COMMANDS = [
   new SlashCommandBuilder().setName("giry").setDescription("💥 Giry envoie la flash de Skye !"),
   new SlashCommandBuilder().setName("67").setDescription("🎲 Six Seven !"),
   new SlashCommandBuilder().setName("cassandre").setDescription("🔗 Cassandre sort Deadlock !"),
+  new SlashCommandBuilder()
+    .setName("ratio").setDescription("☑️ Ratio quelqu'un")
+    .addUserOption(o => o.setName("cible").setDescription("La victime").setRequired(true)),
+
+  // ── Utilitaires ──────────────────────────────────────────
+  new SlashCommandBuilder().setName("meteo").setDescription("🌦️ Météo actuelle du serveur MC"),
+  new SlashCommandBuilder().setName("joueurs").setDescription("👥 Joueurs connectés sur le MC"),
+  new SlashCommandBuilder().setName("objectif").setDescription("🎯 Objectif actuel du serveur"),
+  new SlashCommandBuilder()
+    .setName("sondage").setDescription("📊 Créer un sondage rapide")
+    .addStringOption(o => o.setName("question").setDescription("Ta question").setRequired(true))
+    .addStringOption(o => o.setName("choix1").setDescription("Choix 1").setRequired(false))
+    .addStringOption(o => o.setName("choix2").setDescription("Choix 2").setRequired(false))
+    .addStringOption(o => o.setName("choix3").setDescription("Choix 3").setRequired(false))
+    .addStringOption(o => o.setName("choix4").setDescription("Choix 4").setRequired(false)),
+  new SlashCommandBuilder()
+    .setName("rappel").setDescription("⏰ Se rappeler quelque chose")
+    .addIntegerOption(o => o.setName("minutes").setDescription("Dans combien de minutes").setRequired(true))
+    .addStringOption(o => o.setName("message").setDescription("De quoi te rappeler").setRequired(true)),
+
+  // ── Commandes MC via RCON (Admin) ────────────────────────
+  new SlashCommandBuilder()
+    .setName("mc-say").setDescription("📢 Envoyer un message dans le chat MC (Admin)")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(o => o.setName("message").setDescription("Message à envoyer").setRequired(true)),
+  new SlashCommandBuilder()
+    .setName("mc-give").setDescription("🎁 Donner un item à un joueur MC (Admin)")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(o => o.setName("joueur").setDescription("Pseudo MC").setRequired(true))
+    .addStringOption(o => o.setName("item").setDescription("Ex: minecraft:diamond").setRequired(true))
+    .addIntegerOption(o => o.setName("quantite").setDescription("Quantité").setRequired(false)),
+  new SlashCommandBuilder()
+    .setName("mc-tp").setDescription("🌀 Téléporter un joueur MC (Admin)")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(o => o.setName("joueur").setDescription("Joueur à tp").setRequired(true))
+    .addStringOption(o => o.setName("destination").setDescription("Joueur destination ou coordonnées X Y Z").setRequired(true)),
+  new SlashCommandBuilder()
+    .setName("mc-time").setDescription("🕐 Changer l'heure sur le MC (Admin)")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(o => o.setName("moment").setDescription("day / night / noon / midnight").setRequired(true)),
+  new SlashCommandBuilder()
+    .setName("mc-weather").setDescription("🌤️ Changer la météo sur le MC (Admin)")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(o => o.setName("type").setDescription("clear / rain / thunder").setRequired(true)),
+  new SlashCommandBuilder()
+    .setName("mc-objectif").setDescription("🎯 Définir l'objectif du serveur (Admin)")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(o => o.setName("texte").setDescription("Nouvel objectif").setRequired(true)),
 
   // ── Admin / Mod ─────────────────────────────────────────
   new SlashCommandBuilder()
@@ -576,10 +661,11 @@ client.on("interactionCreate", async (interaction) => {
         { name: "── 🎮 Minecraft ──",     value: "`/ip` · `/stats`",                                  inline: false },
         { name: "── 🌐 Serveur ──",       value: "`/serverinfo`",                                     inline: false },
         { name: "── 🏅 Profil ──",        value: "`/grade` · `/niveau` · `/top`",                    inline: false },
-        { name: "── 😂 Fun ──",           value: "`/blague` · `/soules` · `/giry` · `/67` · `/cassandre`", inline: false },
+        { name: "── 😂 Fun ──",           value: "`/blague` · `/soules` · `/giry` · `/67` · `/cassandre` · `/ratio`", inline: false },
+        { name: "── 🌐 Utilitaires ──",   value: "`/meteo` · `/joueurs` · `/objectif` · `/sondage` · `/rappel`",      inline: false },
         { name: "── 🎫 Support ──",       value: "`/ticket`",                                         inline: false },
         { name: "── 🔨 Modération ──",    value: "`/ban` · `/kick` · `/mute` · `/unmute`",            inline: false },
-        { name: "── ⚙️ Admin ──",         value: "`/reglement` · `/roles` · `/vittel`",               inline: false },
+        { name: "── ⚙️ Admin ──",         value: "`/reglement` · `/roles` · `/vittel` · `/mc-objectif`\n`/mc-say` · `/mc-give` · `/mc-tp` · `/mc-time` · `/mc-weather`", inline: false },
       ],
     })], ephemeral: true });
   }
@@ -985,6 +1071,215 @@ client.on("interactionCreate", async (interaction) => {
         ],
       })] });
     } catch { return interaction.reply({ content: "❌ Erreur lors du unmute.", ephemeral: true }); }
+  }
+
+  // ── /ratio ────────────────────────────────────────────────
+  if (cmd === "ratio") {
+    const cible = interaction.options.getUser("cible");
+    if (cible.id === interaction.user.id)
+      return interaction.reply({ content: "❌ Tu peux pas te ratio toi-même...", ephemeral: true });
+    const reactions = ["noooon", "comment osez-vous", "j'y crois pas", "c'est injuste", "touchée", "impossible", "je suis choqué"];
+    return interaction.reply({ embeds: [makeEmbed({
+      color: C.CYAN,
+      title: "☑️ Ratio",
+      description: `${interaction.user} vient de **ratio** ${cible} ! 📉\n\n> *${cible.username} : "${reactions[Math.floor(Math.random() * reactions.length)]}"*`,
+      thumbnail: cible.displayAvatarURL({ dynamic: true }),
+    })] });
+  }
+
+  // ── /meteo ────────────────────────────────────────────────
+  if (cmd === "meteo") {
+    await interaction.deferReply();
+    const result = await rconExec("weather query");
+    let meteo = "Inconnue", emoji = "❓", color = C.BLUE;
+    if (result.ok) {
+      const r = result.response.toLowerCase();
+      if (r.includes("clear"))        { meteo = "Ciel dégagé";  emoji = "☀️"; color = C.GOLD;   }
+      else if (r.includes("rain"))    { meteo = "Pluie";        emoji = "🌧️"; color = C.BLUE;   }
+      else if (r.includes("thunder")) { meteo = "Orage";        emoji = "⛈️"; color = C.PURPLE; }
+      else { meteo = result.response; }
+    }
+    return interaction.editReply({ embeds: [makeEmbed({
+      color,
+      title: `${emoji} Météo sur Soulakri`,
+      description: result.ok
+        ? `La météo actuelle est : **${meteo} ${emoji}**`
+        : `❌ Serveur MC hors ligne ou RCON non configuré.\n\`${result.error}\``,
+      fields: result.ok ? [
+        { name: "🌍 Serveur", value: `\`${C.MC_IP}\``, inline: true },
+        { name: "📡 État",    value: "En ligne ✅",    inline: true },
+      ] : [],
+    })] });
+  }
+
+  // ── /joueurs ──────────────────────────────────────────────
+  if (cmd === "joueurs") {
+    await interaction.deferReply();
+    const result = await rconExec("list");
+    return interaction.editReply({ embeds: [makeEmbed({
+      color: C.GREEN,
+      title: "👥 Joueurs connectés sur Soulakri",
+      thumbnail: C.LOGO_URL,
+      description: result.ok
+        ? `\`\`\`${result.response || "Aucun joueur connecté."}\`\`\``
+        : `❌ Serveur MC hors ligne ou RCON non configuré.\n\`${result.error}\``,
+      fields: [{ name: "🎮 IP", value: `\`${C.MC_IP}:${C.MC_PORT}\``, inline: true }],
+    })] });
+  }
+
+  // ── /objectif ─────────────────────────────────────────────
+  if (cmd === "objectif") {
+    const obj = loadObjectif();
+    return interaction.reply({ embeds: [makeEmbed({
+      color: C.GOLD,
+      title: "🎯 Objectif actuel — Soulakri",
+      description: `> ${obj.texte}`,
+      thumbnail: C.LOGO_URL,
+      fields: obj.updatedBy ? [
+        { name: "✏️ Mis à jour par", value: `<@${obj.updatedBy}>`,                        inline: true },
+        { name: "📅 Le",             value: `<t:${Math.floor(obj.updatedAt / 1000)}:D>`,  inline: true },
+      ] : [],
+    })] });
+  }
+
+  // ── /sondage ──────────────────────────────────────────────
+  if (cmd === "sondage") {
+    const question = interaction.options.getString("question");
+    const choix = [1,2,3,4]
+      .map(i => interaction.options.getString(`choix${i}`))
+      .filter(Boolean);
+    const emojis = ["1️⃣","2️⃣","3️⃣","4️⃣"];
+    const description = choix.length
+      ? choix.map((c, i) => `${emojis[i]} ${c}`).join("\n\n")
+      : "Réponds avec ✅ ou ❌";
+
+    const msg = await interaction.reply({ embeds: [makeEmbed({
+      color: C.PURPLE,
+      title: `📊 ${question}`,
+      description,
+      fields: [{ name: "📣 Lancé par", value: interaction.user.toString(), inline: true }],
+    })], fetchReply: true });
+
+    if (choix.length) {
+      for (let i = 0; i < choix.length; i++) await msg.react(emojis[i]).catch(() => {});
+    } else {
+      await msg.react("✅").catch(() => {});
+      await msg.react("❌").catch(() => {});
+    }
+    return;
+  }
+
+  // ── /rappel ───────────────────────────────────────────────
+  if (cmd === "rappel") {
+    const minutes = interaction.options.getInteger("minutes");
+    const message = interaction.options.getString("message");
+    if (minutes < 1 || minutes > 1440)
+      return interaction.reply({ content: "❌ Entre 1 et 1440 minutes (24h max).", ephemeral: true });
+
+    await interaction.reply({ embeds: [makeEmbed({
+      color: C.CYAN,
+      title: "⏰ Rappel enregistré !",
+      description: `Je te rappellerai dans **${minutes} minute${minutes > 1 ? "s" : ""}**.\n📌 *${message}*`,
+    })], ephemeral: true });
+
+    setTimeout(async () => {
+      try {
+        await interaction.user.send({ embeds: [makeEmbed({
+          color: C.GOLD,
+          title: "🔔 Rappel Soulakri !",
+          description: `Tu m'avais demandé de te rappeler :\n\n> **${message}**`,
+        })] });
+      } catch {
+        // Si les DMs sont fermés, envoie dans le salon d'origine
+        const ch = interaction.channel;
+        if (ch) await ch.send({ content: `${interaction.user} 🔔 Rappel : **${message}**` }).catch(() => {});
+      }
+    }, minutes * 60 * 1000);
+    return;
+  }
+
+  // ── COMMANDES MC VIA RCON ─────────────────────────────────
+
+  if (cmd === "mc-say") {
+    const message = interaction.options.getString("message");
+    await interaction.deferReply({ ephemeral: true });
+    const result = await rconExec(`say [Discord] ${interaction.user.username}: ${message}`);
+    return interaction.editReply({ embeds: [makeEmbed({
+      color: result.ok ? C.GREEN : C.RED,
+      title: result.ok ? "📢 Message envoyé !" : "❌ Erreur RCON",
+      description: result.ok
+        ? `\`[Discord] ${interaction.user.username}: ${message}\``
+        : `\`${result.error}\``,
+    })] });
+  }
+
+  if (cmd === "mc-give") {
+    const joueur = interaction.options.getString("joueur");
+    const item   = interaction.options.getString("item");
+    const qte    = interaction.options.getInteger("quantite") || 1;
+    await interaction.deferReply({ ephemeral: true });
+    const result = await rconExec(`give ${joueur} ${item} ${qte}`);
+    return interaction.editReply({ embeds: [makeEmbed({
+      color: result.ok ? C.GREEN : C.RED,
+      title: result.ok ? "🎁 Item donné !" : "❌ Erreur RCON",
+      description: result.ok
+        ? `**${qte}x** \`${item}\` → **${joueur}**`
+        : `\`${result.error}\``,
+    })] });
+  }
+
+  if (cmd === "mc-tp") {
+    const joueur = interaction.options.getString("joueur");
+    const dest   = interaction.options.getString("destination");
+    await interaction.deferReply({ ephemeral: true });
+    const result = await rconExec(`tp ${joueur} ${dest}`);
+    return interaction.editReply({ embeds: [makeEmbed({
+      color: result.ok ? C.GREEN : C.RED,
+      title: result.ok ? "🌀 Téléportation effectuée !" : "❌ Erreur RCON",
+      description: result.ok
+        ? `**${joueur}** → **${dest}**`
+        : `\`${result.error}\``,
+    })] });
+  }
+
+  if (cmd === "mc-time") {
+    const moment = interaction.options.getString("moment");
+    const allowed = ["day", "night", "noon", "midnight"];
+    if (!allowed.includes(moment))
+      return interaction.reply({ content: `❌ Valeurs acceptées : ${allowed.join(", ")}`, ephemeral: true });
+    await interaction.deferReply({ ephemeral: true });
+    const result = await rconExec(`time set ${moment}`);
+    const emojis = { day: "☀️", night: "🌙", noon: "🌞", midnight: "🌚" };
+    return interaction.editReply({ embeds: [makeEmbed({
+      color: result.ok ? C.GOLD : C.RED,
+      title: result.ok ? `${emojis[moment]} Heure changée !` : "❌ Erreur RCON",
+      description: result.ok ? `L'heure est maintenant : **${moment}**` : `\`${result.error}\``,
+    })] });
+  }
+
+  if (cmd === "mc-weather") {
+    const type = interaction.options.getString("type");
+    const allowed = ["clear", "rain", "thunder"];
+    if (!allowed.includes(type))
+      return interaction.reply({ content: `❌ Valeurs acceptées : ${allowed.join(", ")}`, ephemeral: true });
+    await interaction.deferReply({ ephemeral: true });
+    const result = await rconExec(`weather ${type}`);
+    const emojis = { clear: "☀️", rain: "🌧️", thunder: "⛈️" };
+    return interaction.editReply({ embeds: [makeEmbed({
+      color: result.ok ? C.CYAN : C.RED,
+      title: result.ok ? `${emojis[type]} Météo changée !` : "❌ Erreur RCON",
+      description: result.ok ? `Météo : **${type}**` : `\`${result.error}\``,
+    })] });
+  }
+
+  if (cmd === "mc-objectif") {
+    const texte = interaction.options.getString("texte");
+    saveObjectif({ texte, updatedBy: interaction.user.id, updatedAt: Date.now() });
+    return interaction.reply({ embeds: [makeEmbed({
+      color: C.GOLD,
+      title: "🎯 Objectif mis à jour !",
+      description: `> ${texte}`,
+    })], ephemeral: true });
   }
 
 });
