@@ -1,6 +1,5 @@
 // ============================================================
 //  SOULAKRI BOT v5 — discord.js v14
-//  Refactor propre + /giry + /67 + /cassandre + fix /soules
 // ============================================================
 
 require("dotenv").config();
@@ -760,8 +759,7 @@ client.on("interactionCreate", async (interaction) => {
       color: 0x4CAF50,
       title: "💚 SEEKERS OUT ! Giry envoie la flash de Skye !",
       description: `${interaction.user} joue **GIRY** ! 🦅\n*T'as les yeux dans ta poche !*`,
-      // GIF Skye flash Valorant (tenor media direct)
-      image: "https://media.tenor.com/NsELqyBRdU8AAAAC/valorant-skye.gif",
+      image: "https://i.imgur.com/3h3Y01m.gif",
     }).setFooter({ text: C.FOOTER, iconURL: C.LOGO_URL })] });
   }
 
@@ -771,7 +769,7 @@ client.on("interactionCreate", async (interaction) => {
       color: 0xFFD700,
       title: "🎲 SIX SEVEN ! 67 !",
       description: `${interaction.user} sort le **67** ! 🎵`,
-      image: "https://media.tenor.com/YXpBVl-g4e4AAAAC/67-six-seven.gif",
+      image: "https://i.imgur.com/tTLkRlr.gif",
     }).setFooter({ text: C.FOOTER, iconURL: C.LOGO_URL })] });
   }
 
@@ -781,7 +779,7 @@ client.on("interactionCreate", async (interaction) => {
       color: 0xB8860B,
       title: "🔗 NEURAL THEFT ! Cassandre sort Deadlock !",
       description: `${interaction.user} joue **CASSANDRE** ! ⛓️\n*GravNet lancé !*`,
-      image: "https://media.tenor.com/xOREWXUvzncAAAAC/deadlock-valorant.gif",
+      image: "https://i.imgur.com/3D8zQTb.gif",
     }).setFooter({ text: C.FOOTER, iconURL: C.LOGO_URL })] });
   }
 
