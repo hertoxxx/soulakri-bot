@@ -37,6 +37,7 @@ const C = {
 
   MC_IP:        "soulakri.falix.gg",
   MC_PORT:      "22608",
+  MC_BEDROCK_IP: "eu15-free.falixserver.net",
   FALIX_SERVER: "2870153",
 
   LOGO_URL: "https://i.imgur.com/igybOpU.png",
@@ -279,13 +280,16 @@ async function checkBedrockPort() {
     const newPort = falixResult.port;
     if (!newPort) return;
 
-    // Récupère l'IP publique via mcsrvstat (Java, plus fiable)
-    let newIP = C.MC_IP;
+    const newIP = C.MC_BEDROCK_IP;
     try {
-      const srvRes = await fetch(`https://api.mcsrvstat.us/3/${C.MC_IP}:${C.MC_PORT}`);
-      if (srvRes.ok) {
-        const srvData = await srvRes.json();
-        if (srvData?.ip) newIP = srvData.ip;
+      const falixIPRes = await fetch(
+        `https://client.falixnodes.net/api/v1/servers/${C.FALIX_SERVER}`,
+        { headers: getFalixHeaders() }
+      );
+      if (falixIPRes.ok) {
+        const falixData = await falixIPRes.json();
+        const ip = falixData?.allocation?.ip || falixData?.ip || falixData?.node?.ip;
+        if (ip) newIP = ip;
       }
     } catch {}
 
