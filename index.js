@@ -1,12 +1,10 @@
 // ============================================================
-//  SOULAKRI BOT v6 — discord.js v14
-//  + RCON Minecraft + /meteo /rappel /objectif /ratio /joueurs /sondage
-//  + Commandes MC depuis Discord : /mc-say /mc-give /mc-tp /mc-time /mc-weather
+//  SOULAKRI BOT v7 — discord.js v14
+//  RCON remplacé par API MCSrvStat (FalixNodes = 1 port)
 // ============================================================
 
 require("dotenv").config();
-const fs   = require("fs");
-const { Rcon } = require("rcon-client");
+const fs = require("fs");
 const {
   Client, GatewayIntentBits, Partials,
   EmbedBuilder, ButtonBuilder, ButtonStyle,
@@ -16,11 +14,10 @@ const {
 } = require("discord.js");
 
 // ============================================================
-//  CONFIG — modifie uniquement cette section
+//  CONFIG
 // ============================================================
 
 const C = {
-  // IDs Discord
   GUILD_ID:          "1487136081152577556",
   CHANNEL_REGLEMENT: "1487136083627086010",
   CHANNEL_BIENVENUE: "1487136083627086009",
@@ -28,7 +25,6 @@ const C = {
   CHANNEL_ROLES:     "1487136083627086011",
   CHANNEL_MATHS:     "1487136084986040467",
 
-  // Rôles
   ROLE_JOUEUR:      "1489335006290776174",
   ROLE_NON_VERIFIE: "1489335084568936498",
   ROLE_ADMIN:       "1487136081198448730",
@@ -38,18 +34,12 @@ const C = {
   ROLE_SURVIE:      "1489910021876875354",
   ROLE_NOTIFS:      "1489910094287077466",
 
-  // Minecraft
-  MC_IP:        "soulakri.falix.gg",
-  MC_PORT:      "22608",
-  RCON_HOST:    "soulakri.falix.gg",  // même IP que le serveur
-  RCON_PORT:    25575,                 // port RCON (server.properties)
-  RCON_PASS:    process.env.RCON_PASSWORD || "changeme",
+  MC_IP:   "soulakri.falix.gg",
+  MC_PORT: "22608",
 
-  // Branding
   LOGO_URL: "https://i.imgur.com/igybOpU.png",
   FOOTER:   "Soulakri • Survie & Fun Crossplay",
 
-  // Couleurs
   BLUE:   0x5DADE2,
   GOLD:   0xF4D03F,
   RED:    0xE74C3C,
@@ -60,12 +50,10 @@ const C = {
   CYAN:   0x1ABC9C,
   PINK:   0xFF69B4,
 
-  // XP
   XP_MIN:         15,
   XP_MAX:         40,
   XP_COOLDOWN_MS: 60_000,
 
-  // Vittel BOT
   VITTEL_INTERVAL_MS: 5 * 60 * 1000,
   VITTEL_TIMEOUT_MS:  60 * 1000,
 };
@@ -88,7 +76,7 @@ const client = new Client({
 const TOKEN = process.env.DISCORD_TOKEN;
 
 // ============================================================
-//  XP — persistance fichier
+//  XP
 // ============================================================
 
 const XP_FILE = "./xp_data.json";
@@ -130,7 +118,7 @@ function addXP(userId, amount) {
 }
 
 // ============================================================
-//  UTILS — embeds & logs
+//  UTILS
 // ============================================================
 
 function makeEmbed({ color, title, description, fields = [], thumbnail, image, author } = {}) {
@@ -156,7 +144,42 @@ async function logAction(guild, { title, description, color, fields = [] }) {
 }
 
 // ============================================================
-//  VITTEL BOT — questions maths automatiques
+//  API MINECRAFT — remplace RCON
+// ============================================================
+
+async function getServerData() {
+  try {
+    const res = await fetch(`https://api.mcsrvstat.us/3/${C.MC_IP}:${C.MC_PORT}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+// ============================================================
+//  OBJECTIF
+// ============================================================
+
+const OBJECTIF_FILE = "./objectif.json";
+function loadObjectif() {
+  if (!fs.existsSync(OBJECTIF_FILE)) return { texte: "Aucun objectif défini pour l'instant.", updatedBy: null, updatedAt: null };
+  try { return JSON.parse(fs.readFileSync(OBJECTIF_FILE, "utf8")); } catch { return { texte: "Aucun objectif défini.", updatedBy: null, updatedAt: null }; }
+}
+function saveObjectif(data) { fs.writeFileSync(OBJECTIF_FILE, JSON.stringify(data, null, 2)); }
+
+// ============================================================
+//  BLAGUES
+// ============================================================
+
+const BLAGUES = [
+  { joke: "Pourquoi Creeper est toujours seul ?",              answer: "Parce qu'il fait exploser toutes ses relations ! 💥" },
+  { joke: "Comment s'appelle un joueur Minecraft qui pleure ?", answer: "Un mineur en larmes ! ⛏️" },
+  { joke: "Quel est le sport préféré des Endermen ?",           answer: "La téléportation marathon ! 🏃" },
+  { joke: "Pourquoi Steve ne sourit jamais ?",                  answer: "Parce qu'il a perdu ses diamonds dans la lave ! 💎" },
+  { joke: "Pourquoi les Zombies n'aiment pas le soleil ?",      answer: "Parce qu'il leur tape sur les nerfs… et sur la peau ! ☀️" },
+];
+
+// ============================================================
+//  VITTEL BOT
 // ============================================================
 
 let vittelActive = null;
@@ -284,50 +307,7 @@ function startVittelBot() {
 }
 
 // ============================================================
-//  RCON — helper pour envoyer des commandes au serveur MC
-// ============================================================
-
-async function rconExec(command) {
-  const rcon = new Rcon({
-    host: C.RCON_HOST,
-    port: C.RCON_PORT,
-    password: C.RCON_PASS,
-    timeout: 5000,
-  });
-  try {
-    await rcon.connect();
-    const response = await rcon.send(command);
-    await rcon.end();
-    return { ok: true, response: response || "(commande exécutée)" };
-  } catch (err) {
-    try { await rcon.end(); } catch {}
-    return { ok: false, error: err.message };
-  }
-}
-
-// ============================================================
-//  OBJECTIF — stockage fichier
-// ============================================================
-
-const OBJECTIF_FILE = "./objectif.json";
-function loadObjectif() {
-  if (!fs.existsSync(OBJECTIF_FILE)) return { texte: "Aucun objectif défini pour l'instant.", updatedBy: null, updatedAt: null };
-  try { return JSON.parse(fs.readFileSync(OBJECTIF_FILE, "utf8")); } catch { return { texte: "Aucun objectif défini.", updatedBy: null, updatedAt: null }; }
-}
-function saveObjectif(data) { fs.writeFileSync(OBJECTIF_FILE, JSON.stringify(data, null, 2)); }
-
-
-
-const BLAGUES = [
-  { joke: "Pourquoi Creeper est toujours seul ?",          answer: "Parce qu'il fait exploser toutes ses relations ! 💥" },
-  { joke: "Comment s'appelle un joueur Minecraft qui pleure ?", answer: "Un mineur en larmes ! ⛏️" },
-  { joke: "Quel est le sport préféré des Endermen ?",      answer: "La téléportation marathon ! 🏃" },
-  { joke: "Pourquoi Steve ne sourit jamais ?",             answer: "Parce qu'il a perdu ses diamonds dans la lave ! 💎" },
-  { joke: "Pourquoi les Zombies n'aiment pas le soleil ?", answer: "Parce qu'il leur tape sur les nerfs… et sur la peau ! ☀️" },
-];
-
-// ============================================================
-//  COMMANDES SLASH — définitions
+//  COMMANDES SLASH
 // ============================================================
 
 const COMMANDS = [
@@ -344,7 +324,6 @@ const COMMANDS = [
     .addStringOption(o => o.setName("pseudo").setDescription("Pseudo Minecraft").setRequired(true)),
   new SlashCommandBuilder().setName("blague").setDescription("Blague Minecraft aléatoire 😂"),
 
-  // ── Fun Valorant ────────────────────────────────────────
   new SlashCommandBuilder().setName("soules").setDescription("🔥 Soules lance une flash !"),
   new SlashCommandBuilder().setName("giry").setDescription("💥 Giry envoie la flash de Skye !"),
   new SlashCommandBuilder().setName("67").setDescription("🎲 Six Seven !"),
@@ -353,8 +332,7 @@ const COMMANDS = [
     .setName("ratio").setDescription("☑️ Ratio quelqu'un")
     .addUserOption(o => o.setName("cible").setDescription("La victime").setRequired(true)),
 
-  // ── Utilitaires ──────────────────────────────────────────
-  new SlashCommandBuilder().setName("meteo").setDescription("🌦️ Météo actuelle du serveur MC"),
+  new SlashCommandBuilder().setName("statserveur").setDescription("🌐 Statut du serveur Minecraft"),
   new SlashCommandBuilder().setName("joueurs").setDescription("👥 Joueurs connectés sur le MC"),
   new SlashCommandBuilder().setName("objectif").setDescription("🎯 Objectif actuel du serveur"),
   new SlashCommandBuilder()
@@ -369,36 +347,11 @@ const COMMANDS = [
     .addIntegerOption(o => o.setName("minutes").setDescription("Dans combien de minutes").setRequired(true))
     .addStringOption(o => o.setName("message").setDescription("De quoi te rappeler").setRequired(true)),
 
-  // ── Commandes MC via RCON (Admin) ────────────────────────
-  new SlashCommandBuilder()
-    .setName("mc-say").setDescription("📢 Envoyer un message dans le chat MC (Admin)")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addStringOption(o => o.setName("message").setDescription("Message à envoyer").setRequired(true)),
-  new SlashCommandBuilder()
-    .setName("mc-give").setDescription("🎁 Donner un item à un joueur MC (Admin)")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addStringOption(o => o.setName("joueur").setDescription("Pseudo MC").setRequired(true))
-    .addStringOption(o => o.setName("item").setDescription("Ex: minecraft:diamond").setRequired(true))
-    .addIntegerOption(o => o.setName("quantite").setDescription("Quantité").setRequired(false)),
-  new SlashCommandBuilder()
-    .setName("mc-tp").setDescription("🌀 Téléporter un joueur MC (Admin)")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addStringOption(o => o.setName("joueur").setDescription("Joueur à tp").setRequired(true))
-    .addStringOption(o => o.setName("destination").setDescription("Joueur destination ou coordonnées X Y Z").setRequired(true)),
-  new SlashCommandBuilder()
-    .setName("mc-time").setDescription("🕐 Changer l'heure sur le MC (Admin)")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addStringOption(o => o.setName("moment").setDescription("day / night / noon / midnight").setRequired(true)),
-  new SlashCommandBuilder()
-    .setName("mc-weather").setDescription("🌤️ Changer la météo sur le MC (Admin)")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addStringOption(o => o.setName("type").setDescription("clear / rain / thunder").setRequired(true)),
   new SlashCommandBuilder()
     .setName("mc-objectif").setDescription("🎯 Définir l'objectif du serveur (Admin)")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addStringOption(o => o.setName("texte").setDescription("Nouvel objectif").setRequired(true)),
 
-  // ── Admin / Mod ─────────────────────────────────────────
   new SlashCommandBuilder()
     .setName("reglement").setDescription("Poster le règlement (Admin)")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
@@ -508,9 +461,9 @@ client.on("guildMemberAdd", async (member) => {
             `2️⃣ Rôles → <#${C.CHANNEL_ROLES}>\n` +
             `3️⃣ Minecraft → \`${C.MC_IP}\``,
         },
-        { name: "👥 Membres",   value: `**${member.guild.memberCount}**`, inline: true },
-        { name: "🎮 Version",   value: "`Java & Bedrock`",               inline: true },
-        { name: "🌍 Mode",      value: "`Survie Crossplay`",             inline: true },
+        { name: "👥 Membres", value: `**${member.guild.memberCount}**`, inline: true },
+        { name: "🎮 Version", value: "`Java & Bedrock`",               inline: true },
+        { name: "🌍 Mode",    value: "`Survie Crossplay`",             inline: true },
       ],
     });
 
@@ -526,8 +479,8 @@ client.on("guildMemberAdd", async (member) => {
       description: `**${member.user.tag}** a rejoint`,
       color: C.GREEN,
       fields: [
-        { name: "ID",           value: member.user.id,                                              inline: true },
-        { name: "Compte créé",  value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:D>`,  inline: true },
+        { name: "ID",          value: member.user.id,                                             inline: true },
+        { name: "Compte créé", value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:D>`, inline: true },
       ],
     });
   } catch (err) { console.error("guildMemberAdd :", err); }
@@ -581,7 +534,6 @@ client.on("interactionCreate", async (interaction) => {
 
   if (interaction.isButton()) {
 
-    // Accepter le règlement
     if (interaction.customId === "accept_rules") {
       try {
         const roleJoueur = interaction.guild.roles.cache.get(C.ROLE_JOUEUR);
@@ -658,14 +610,14 @@ client.on("interactionCreate", async (interaction) => {
       title: "📖 Commandes disponibles",
       thumbnail: C.LOGO_URL,
       fields: [
-        { name: "── 🎮 Minecraft ──",     value: "`/ip` · `/stats`",                                  inline: false },
-        { name: "── 🌐 Serveur ──",       value: "`/serverinfo`",                                     inline: false },
-        { name: "── 🏅 Profil ──",        value: "`/grade` · `/niveau` · `/top`",                    inline: false },
-        { name: "── 😂 Fun ──",           value: "`/blague` · `/soules` · `/giry` · `/67` · `/cassandre` · `/ratio`", inline: false },
-        { name: "── 🌐 Utilitaires ──",   value: "`/meteo` · `/joueurs` · `/objectif` · `/sondage` · `/rappel`",      inline: false },
-        { name: "── 🎫 Support ──",       value: "`/ticket`",                                         inline: false },
-        { name: "── 🔨 Modération ──",    value: "`/ban` · `/kick` · `/mute` · `/unmute`",            inline: false },
-        { name: "── ⚙️ Admin ──",         value: "`/reglement` · `/roles` · `/vittel` · `/mc-objectif`\n`/mc-say` · `/mc-give` · `/mc-tp` · `/mc-time` · `/mc-weather`", inline: false },
+        { name: "── 🎮 Minecraft ──",   value: "`/ip` · `/stats` · `/joueurs` · `/statserveur`",              inline: false },
+        { name: "── 🌐 Serveur ──",     value: "`/serverinfo`",                                               inline: false },
+        { name: "── 🏅 Profil ──",      value: "`/grade` · `/niveau` · `/top`",                              inline: false },
+        { name: "── 😂 Fun ──",         value: "`/blague` · `/soules` · `/giry` · `/67` · `/cassandre` · `/ratio`", inline: false },
+        { name: "── 🔧 Utilitaires ──", value: "`/objectif` · `/sondage` · `/rappel`",                       inline: false },
+        { name: "── 🎫 Support ──",     value: "`/ticket`",                                                   inline: false },
+        { name: "── 🔨 Modération ──",  value: "`/ban` · `/kick` · `/mute` · `/unmute`",                     inline: false },
+        { name: "── ⚙️ Admin ──",       value: "`/reglement` · `/roles` · `/vittel` · `/mc-objectif`",       inline: false },
       ],
     })], ephemeral: true });
   }
@@ -804,9 +756,9 @@ client.on("interactionCreate", async (interaction) => {
         image: `https://mc-heads.net/body/${uuid}/128`,
         description: "*Stats de jeu disponibles une fois le serveur MC configuré.*",
         fields: [
-          { name: "🎮 Pseudo", value: `\`${name}\``,                                            inline: true },
-          { name: "🔑 UUID",   value: `\`${uuid.substring(0, 8)}...\``,                         inline: true },
-          { name: "🌐 NameMC", value: `[Voir le profil](https://namemc.com/profile/${uuid})`,   inline: true },
+          { name: "🎮 Pseudo", value: `\`${name}\``,                                          inline: true },
+          { name: "🔑 UUID",   value: `\`${uuid.substring(0, 8)}...\``,                       inline: true },
+          { name: "🌐 NameMC", value: `[Voir le profil](https://namemc.com/profile/${uuid})`, inline: true },
         ],
       })], components: [row] });
     } catch { return interaction.editReply({ content: "❌ Erreur API Mojang. Réessaie." }); }
@@ -827,9 +779,7 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
-  // ── COMMANDES FUN VALORANT ────────────────────────────────
-
-  // /soules — flash de Soules (agent : Phoenix → Soules)
+  // /soules
   if (cmd === "soules") {
     return interaction.reply({ embeds: [makeEmbed({
       color: 0xFF6600,
@@ -839,7 +789,7 @@ client.on("interactionCreate", async (interaction) => {
     }).setFooter({ text: C.FOOTER, iconURL: C.LOGO_URL })] });
   }
 
-  // /giry — flash de Skye
+  // /giry
   if (cmd === "giry") {
     return interaction.reply({ embeds: [makeEmbed({
       color: 0x4CAF50,
@@ -849,7 +799,7 @@ client.on("interactionCreate", async (interaction) => {
     }).setFooter({ text: C.FOOTER, iconURL: C.LOGO_URL })] });
   }
 
-  // /67 — six seven
+  // /67
   if (cmd === "67") {
     return interaction.reply({ embeds: [makeEmbed({
       color: 0xFFD700,
@@ -859,7 +809,7 @@ client.on("interactionCreate", async (interaction) => {
     }).setFooter({ text: C.FOOTER, iconURL: C.LOGO_URL })] });
   }
 
-  // /cassandre — Deadlock
+  // /cassandre
   if (cmd === "cassandre") {
     return interaction.reply({ embeds: [makeEmbed({
       color: 0xB8860B,
@@ -869,8 +819,158 @@ client.on("interactionCreate", async (interaction) => {
     }).setFooter({ text: C.FOOTER, iconURL: C.LOGO_URL })] });
   }
 
-  // ── RÈGLEMENT ─────────────────────────────────────────────
+  // /ratio
+  if (cmd === "ratio") {
+    const cible = interaction.options.getUser("cible");
+    if (cible.id === interaction.user.id)
+      return interaction.reply({ content: "❌ Tu peux pas te ratio toi-même...", ephemeral: true });
+    const reactions = ["noooon", "comment osez-vous", "j'y crois pas", "c'est injuste", "touchée", "impossible", "je suis choqué"];
+    return interaction.reply({ embeds: [makeEmbed({
+      color: C.CYAN,
+      title: "☑️ Ratio",
+      description: `${interaction.user} vient de **ratio** ${cible} ! 📉\n\n> *${cible.username} : "${reactions[Math.floor(Math.random() * reactions.length)]}"*`,
+      thumbnail: cible.displayAvatarURL({ dynamic: true }),
+    })] });
+  }
 
+  // /joueurs
+  if (cmd === "joueurs") {
+    await interaction.deferReply();
+    const data = await getServerData();
+
+    if (!data || !data.online) {
+      return interaction.editReply({ embeds: [makeEmbed({
+        color: C.RED,
+        title: "❌ Serveur hors ligne",
+        description: "Le serveur Minecraft est actuellement **hors ligne** ou inaccessible.",
+        fields: [{ name: "🎮 IP", value: `\`${C.MC_IP}:${C.MC_PORT}\``, inline: true }],
+      })] });
+    }
+
+    const players = data.players?.list?.map(p => `• \`${p.name}\``).join("\n") || "*Aucun joueur connecté*";
+    return interaction.editReply({ embeds: [makeEmbed({
+      color: C.GREEN,
+      title: "👥 Joueurs connectés sur Soulakri",
+      thumbnail: C.LOGO_URL,
+      description: players,
+      fields: [
+        { name: "👤 En ligne", value: `**${data.players?.online ?? 0}** / ${data.players?.max ?? 0}`, inline: true },
+        { name: "🎮 IP",       value: `\`${C.MC_IP}:${C.MC_PORT}\``,                                  inline: true },
+        { name: "📦 Version",  value: `\`${data.version ?? "?"}\``,                                    inline: true },
+      ],
+    })] });
+  }
+
+  // /statserveur
+  if (cmd === "statserveur") {
+    await interaction.deferReply();
+    const data = await getServerData();
+
+    if (!data || !data.online) {
+      return interaction.editReply({ embeds: [makeEmbed({
+        color: C.RED,
+        title: "❌ Serveur hors ligne",
+        description: "Impossible de récupérer les infos — serveur **hors ligne**.",
+        fields: [{ name: "🎮 IP", value: `\`${C.MC_IP}:${C.MC_PORT}\``, inline: true }],
+      })] });
+    }
+
+    return interaction.editReply({ embeds: [makeEmbed({
+      color: C.CYAN,
+      title: "🌐 Statut du serveur Soulakri",
+      thumbnail: C.LOGO_URL,
+      description: "Le serveur est **en ligne** ✅",
+      fields: [
+        { name: "👤 Joueurs", value: `${data.players?.online ?? 0} / ${data.players?.max ?? 0}`, inline: true },
+        { name: "📦 Version", value: `\`${data.version ?? "?"}\``,                                inline: true },
+        { name: "🏓 MOTD",    value: data.motd?.clean?.[0] ?? "Soulakri MC",                      inline: false },
+        { name: "🎮 IP",      value: `\`${C.MC_IP}:${C.MC_PORT}\``,                               inline: true },
+      ],
+    })] });
+  }
+
+  // /objectif
+  if (cmd === "objectif") {
+    const obj = loadObjectif();
+    return interaction.reply({ embeds: [makeEmbed({
+      color: C.GOLD,
+      title: "🎯 Objectif actuel — Soulakri",
+      description: `> ${obj.texte}`,
+      thumbnail: C.LOGO_URL,
+      fields: obj.updatedBy ? [
+        { name: "✏️ Mis à jour par", value: `<@${obj.updatedBy}>`,                       inline: true },
+        { name: "📅 Le",             value: `<t:${Math.floor(obj.updatedAt / 1000)}:D>`, inline: true },
+      ] : [],
+    })] });
+  }
+
+  // /sondage
+  if (cmd === "sondage") {
+    const question = interaction.options.getString("question");
+    const choix = [1, 2, 3, 4]
+      .map(i => interaction.options.getString(`choix${i}`))
+      .filter(Boolean);
+    const emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"];
+    const description = choix.length
+      ? choix.map((c, i) => `${emojis[i]} ${c}`).join("\n\n")
+      : "Réponds avec ✅ ou ❌";
+
+    const msg = await interaction.reply({ embeds: [makeEmbed({
+      color: C.PURPLE,
+      title: `📊 ${question}`,
+      description,
+      fields: [{ name: "📣 Lancé par", value: interaction.user.toString(), inline: true }],
+    })], fetchReply: true });
+
+    if (choix.length) {
+      for (let i = 0; i < choix.length; i++) await msg.react(emojis[i]).catch(() => {});
+    } else {
+      await msg.react("✅").catch(() => {});
+      await msg.react("❌").catch(() => {});
+    }
+    return;
+  }
+
+  // /rappel
+  if (cmd === "rappel") {
+    const minutes = interaction.options.getInteger("minutes");
+    const message = interaction.options.getString("message");
+    if (minutes < 1 || minutes > 1440)
+      return interaction.reply({ content: "❌ Entre 1 et 1440 minutes (24h max).", ephemeral: true });
+
+    await interaction.reply({ embeds: [makeEmbed({
+      color: C.CYAN,
+      title: "⏰ Rappel enregistré !",
+      description: `Je te rappellerai dans **${minutes} minute${minutes > 1 ? "s" : ""}**.\n📌 *${message}*`,
+    })], ephemeral: true });
+
+    setTimeout(async () => {
+      try {
+        await interaction.user.send({ embeds: [makeEmbed({
+          color: C.GOLD,
+          title: "🔔 Rappel Soulakri !",
+          description: `Tu m'avais demandé de te rappeler :\n\n> **${message}**`,
+        })] });
+      } catch {
+        const ch = interaction.channel;
+        if (ch) await ch.send({ content: `${interaction.user} 🔔 Rappel : **${message}**` }).catch(() => {});
+      }
+    }, minutes * 60 * 1000);
+    return;
+  }
+
+  // /mc-objectif
+  if (cmd === "mc-objectif") {
+    const texte = interaction.options.getString("texte");
+    saveObjectif({ texte, updatedBy: interaction.user.id, updatedAt: Date.now() });
+    return interaction.reply({ embeds: [makeEmbed({
+      color: C.GOLD,
+      title: "🎯 Objectif mis à jour !",
+      description: `> ${texte}`,
+    })], ephemeral: true });
+  }
+
+  // /reglement
   if (cmd === "reglement") {
     const ch = interaction.guild.channels.cache.get(C.CHANNEL_REGLEMENT);
     if (!ch) return interaction.reply({ content: "❌ Salon règlement introuvable.", ephemeral: true });
@@ -884,14 +984,14 @@ client.on("interactionCreate", async (interaction) => {
         "Bienvenue sur **Soulakri** ! 🎮\n" +
         "Lis les règles ci-dessous et clique **✅ J'accepte** pour débloquer l'accès complet.\n\u200b",
       fields: [
-        { name: "1️⃣ Respect mutuel",    value: "Insultes, harcèlement et discriminations = ban immédiat.", inline: false },
-        { name: "2️⃣ Anti-cheat",         value: "Tout hack, client modifié ou exploit est interdit. Tolérance zéro.", inline: false },
-        { name: "3️⃣ Anti-grief",         value: "Détruire ou voler les constructions d'autrui est interdit.", inline: false },
-        { name: "4️⃣ Langage",            value: "Pas de spam, flood, caps excessif ni contenu inapproprié.", inline: false },
-        { name: "5️⃣ Pas de pub",         value: "Aucune publicité pour un autre serveur sans autorisation.", inline: false },
-        { name: "6️⃣ Respect des admins", value: "Les décisions des modérateurs sont définitives.", inline: false },
-        { name: "7️⃣ Fair-play",          value: "Soulakri est un serveur fun. Joue dans l'esprit de la commu ! 🌟", inline: false },
-        { name: "\u200b",                 value: "✅ **Si tu acceptes, clique sur le bouton ci-dessous.**" },
+        { name: "1️⃣ Respect mutuel",    value: "Insultes, harcèlement et discriminations = ban immédiat.",    inline: false },
+        { name: "2️⃣ Anti-cheat",        value: "Tout hack, client modifié ou exploit est interdit. Tolérance zéro.", inline: false },
+        { name: "3️⃣ Anti-grief",        value: "Détruire ou voler les constructions d'autrui est interdit.",  inline: false },
+        { name: "4️⃣ Langage",           value: "Pas de spam, flood, caps excessif ni contenu inapproprié.",   inline: false },
+        { name: "5️⃣ Pas de pub",        value: "Aucune publicité pour un autre serveur sans autorisation.",   inline: false },
+        { name: "6️⃣ Respect des admins",value: "Les décisions des modérateurs sont définitives.",             inline: false },
+        { name: "7️⃣ Fair-play",         value: "Soulakri est un serveur fun. Joue dans l'esprit de la commu ! 🌟", inline: false },
+        { name: "\u200b",                value: "✅ **Si tu acceptes, clique sur le bouton ci-dessous.**" },
       ],
     }).setFooter({ text: C.FOOTER + " • Règlement v1.0", iconURL: C.LOGO_URL });
 
@@ -903,11 +1003,10 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply({ content: `✅ Règlement posté dans <#${C.CHANNEL_REGLEMENT}> !`, ephemeral: true });
   }
 
-  // ── SÉLECTEUR DE RÔLES ────────────────────────────────────
-
+  // /roles
   if (cmd === "roles") {
     const ch = interaction.guild.channels.cache.get(C.CHANNEL_ROLES);
-    if (!ch) return interaction.reply({ content: "❌ Salon rôles introuvable. Vérifie CHANNEL_ROLES.", ephemeral: true });
+    if (!ch) return interaction.reply({ content: "❌ Salon rôles introuvable.", ephemeral: true });
 
     const embed = makeEmbed({
       color: C.PURPLE,
@@ -916,10 +1015,10 @@ client.on("interactionCreate", async (interaction) => {
       thumbnail: C.LOGO_URL,
       description: "Sélectionne tes rôles dans le menu. Tu peux en choisir **plusieurs** et changer à tout moment !\n\u200b",
       fields: [
-        { name: "🔨 Builder",        value: "Tu aimes construire et créer",        inline: true },
-        { name: "⚔️ PvP",            value: "Tu adores les combats et duels",       inline: true },
-        { name: "🌲 Survie",         value: "Joueur survie pur et dur",             inline: true },
-        { name: "🔔 Notifications",  value: "Reçois les annonces importantes",      inline: true },
+        { name: "🔨 Builder",       value: "Tu aimes construire et créer",   inline: true },
+        { name: "⚔️ PvP",           value: "Tu adores les combats et duels", inline: true },
+        { name: "🌲 Survie",        value: "Joueur survie pur et dur",        inline: true },
+        { name: "🔔 Notifications", value: "Reçois les annonces importantes", inline: true },
       ],
     }).setFooter({ text: C.FOOTER + " • Modifiable à tout moment", iconURL: C.LOGO_URL });
 
@@ -938,7 +1037,7 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply({ content: `✅ Sélecteur posté dans <#${C.CHANNEL_ROLES}> !`, ephemeral: true });
   }
 
-  // /vittel — forcer une question
+  // /vittel
   if (cmd === "vittel") {
     const ch = interaction.guild.channels.cache.get(C.CHANNEL_MATHS);
     if (!ch)          return interaction.reply({ content: "❌ Salon maths introuvable.", ephemeral: true });
@@ -996,8 +1095,7 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // ── MODÉRATION ────────────────────────────────────────────
-
+  // /ban
   if (cmd === "ban") {
     const target = interaction.options.getMember("membre");
     const raison = interaction.options.getString("raison") || "Aucune raison fournie";
@@ -1007,8 +1105,8 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.reply({ embeds: [makeEmbed({
         color: C.RED, title: "🔨 Membre banni",
         fields: [
-          { name: "👤 Membre", value: target.user.tag,       inline: true },
-          { name: "👮 Par",    value: interaction.user.tag,  inline: true },
+          { name: "👤 Membre", value: target.user.tag,      inline: true },
+          { name: "👮 Par",    value: interaction.user.tag, inline: true },
           { name: "📝 Raison", value: raison },
         ],
       })] });
@@ -1017,6 +1115,7 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
+  // /kick
   if (cmd === "kick") {
     const target = interaction.options.getMember("membre");
     const raison = interaction.options.getString("raison") || "Aucune raison fournie";
@@ -1036,6 +1135,7 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
+  // /mute
   if (cmd === "mute") {
     const target  = interaction.options.getMember("membre");
     const minutes = interaction.options.getInteger("minutes");
@@ -1058,6 +1158,7 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
+  // /unmute
   if (cmd === "unmute") {
     const target = interaction.options.getMember("membre");
     if (!target) return interaction.reply({ content: "❌ Membre introuvable.", ephemeral: true });
@@ -1071,215 +1172,6 @@ client.on("interactionCreate", async (interaction) => {
         ],
       })] });
     } catch { return interaction.reply({ content: "❌ Erreur lors du unmute.", ephemeral: true }); }
-  }
-
-  // ── /ratio ────────────────────────────────────────────────
-  if (cmd === "ratio") {
-    const cible = interaction.options.getUser("cible");
-    if (cible.id === interaction.user.id)
-      return interaction.reply({ content: "❌ Tu peux pas te ratio toi-même...", ephemeral: true });
-    const reactions = ["noooon", "comment osez-vous", "j'y crois pas", "c'est injuste", "touchée", "impossible", "je suis choqué"];
-    return interaction.reply({ embeds: [makeEmbed({
-      color: C.CYAN,
-      title: "☑️ Ratio",
-      description: `${interaction.user} vient de **ratio** ${cible} ! 📉\n\n> *${cible.username} : "${reactions[Math.floor(Math.random() * reactions.length)]}"*`,
-      thumbnail: cible.displayAvatarURL({ dynamic: true }),
-    })] });
-  }
-
-  // ── /meteo ────────────────────────────────────────────────
-  if (cmd === "meteo") {
-    await interaction.deferReply();
-    const result = await rconExec("weather query");
-    let meteo = "Inconnue", emoji = "❓", color = C.BLUE;
-    if (result.ok) {
-      const r = result.response.toLowerCase();
-      if (r.includes("clear"))        { meteo = "Ciel dégagé";  emoji = "☀️"; color = C.GOLD;   }
-      else if (r.includes("rain"))    { meteo = "Pluie";        emoji = "🌧️"; color = C.BLUE;   }
-      else if (r.includes("thunder")) { meteo = "Orage";        emoji = "⛈️"; color = C.PURPLE; }
-      else { meteo = result.response; }
-    }
-    return interaction.editReply({ embeds: [makeEmbed({
-      color,
-      title: `${emoji} Météo sur Soulakri`,
-      description: result.ok
-        ? `La météo actuelle est : **${meteo} ${emoji}**`
-        : `❌ Serveur MC hors ligne ou RCON non configuré.\n\`${result.error}\``,
-      fields: result.ok ? [
-        { name: "🌍 Serveur", value: `\`${C.MC_IP}\``, inline: true },
-        { name: "📡 État",    value: "En ligne ✅",    inline: true },
-      ] : [],
-    })] });
-  }
-
-  // ── /joueurs ──────────────────────────────────────────────
-  if (cmd === "joueurs") {
-    await interaction.deferReply();
-    const result = await rconExec("list");
-    return interaction.editReply({ embeds: [makeEmbed({
-      color: C.GREEN,
-      title: "👥 Joueurs connectés sur Soulakri",
-      thumbnail: C.LOGO_URL,
-      description: result.ok
-        ? `\`\`\`${result.response || "Aucun joueur connecté."}\`\`\``
-        : `❌ Serveur MC hors ligne ou RCON non configuré.\n\`${result.error}\``,
-      fields: [{ name: "🎮 IP", value: `\`${C.MC_IP}:${C.MC_PORT}\``, inline: true }],
-    })] });
-  }
-
-  // ── /objectif ─────────────────────────────────────────────
-  if (cmd === "objectif") {
-    const obj = loadObjectif();
-    return interaction.reply({ embeds: [makeEmbed({
-      color: C.GOLD,
-      title: "🎯 Objectif actuel — Soulakri",
-      description: `> ${obj.texte}`,
-      thumbnail: C.LOGO_URL,
-      fields: obj.updatedBy ? [
-        { name: "✏️ Mis à jour par", value: `<@${obj.updatedBy}>`,                        inline: true },
-        { name: "📅 Le",             value: `<t:${Math.floor(obj.updatedAt / 1000)}:D>`,  inline: true },
-      ] : [],
-    })] });
-  }
-
-  // ── /sondage ──────────────────────────────────────────────
-  if (cmd === "sondage") {
-    const question = interaction.options.getString("question");
-    const choix = [1,2,3,4]
-      .map(i => interaction.options.getString(`choix${i}`))
-      .filter(Boolean);
-    const emojis = ["1️⃣","2️⃣","3️⃣","4️⃣"];
-    const description = choix.length
-      ? choix.map((c, i) => `${emojis[i]} ${c}`).join("\n\n")
-      : "Réponds avec ✅ ou ❌";
-
-    const msg = await interaction.reply({ embeds: [makeEmbed({
-      color: C.PURPLE,
-      title: `📊 ${question}`,
-      description,
-      fields: [{ name: "📣 Lancé par", value: interaction.user.toString(), inline: true }],
-    })], fetchReply: true });
-
-    if (choix.length) {
-      for (let i = 0; i < choix.length; i++) await msg.react(emojis[i]).catch(() => {});
-    } else {
-      await msg.react("✅").catch(() => {});
-      await msg.react("❌").catch(() => {});
-    }
-    return;
-  }
-
-  // ── /rappel ───────────────────────────────────────────────
-  if (cmd === "rappel") {
-    const minutes = interaction.options.getInteger("minutes");
-    const message = interaction.options.getString("message");
-    if (minutes < 1 || minutes > 1440)
-      return interaction.reply({ content: "❌ Entre 1 et 1440 minutes (24h max).", ephemeral: true });
-
-    await interaction.reply({ embeds: [makeEmbed({
-      color: C.CYAN,
-      title: "⏰ Rappel enregistré !",
-      description: `Je te rappellerai dans **${minutes} minute${minutes > 1 ? "s" : ""}**.\n📌 *${message}*`,
-    })], ephemeral: true });
-
-    setTimeout(async () => {
-      try {
-        await interaction.user.send({ embeds: [makeEmbed({
-          color: C.GOLD,
-          title: "🔔 Rappel Soulakri !",
-          description: `Tu m'avais demandé de te rappeler :\n\n> **${message}**`,
-        })] });
-      } catch {
-        // Si les DMs sont fermés, envoie dans le salon d'origine
-        const ch = interaction.channel;
-        if (ch) await ch.send({ content: `${interaction.user} 🔔 Rappel : **${message}**` }).catch(() => {});
-      }
-    }, minutes * 60 * 1000);
-    return;
-  }
-
-  // ── COMMANDES MC VIA RCON ─────────────────────────────────
-
-  if (cmd === "mc-say") {
-    const message = interaction.options.getString("message");
-    await interaction.deferReply({ ephemeral: true });
-    const result = await rconExec(`say [Discord] ${interaction.user.username}: ${message}`);
-    return interaction.editReply({ embeds: [makeEmbed({
-      color: result.ok ? C.GREEN : C.RED,
-      title: result.ok ? "📢 Message envoyé !" : "❌ Erreur RCON",
-      description: result.ok
-        ? `\`[Discord] ${interaction.user.username}: ${message}\``
-        : `\`${result.error}\``,
-    })] });
-  }
-
-  if (cmd === "mc-give") {
-    const joueur = interaction.options.getString("joueur");
-    const item   = interaction.options.getString("item");
-    const qte    = interaction.options.getInteger("quantite") || 1;
-    await interaction.deferReply({ ephemeral: true });
-    const result = await rconExec(`give ${joueur} ${item} ${qte}`);
-    return interaction.editReply({ embeds: [makeEmbed({
-      color: result.ok ? C.GREEN : C.RED,
-      title: result.ok ? "🎁 Item donné !" : "❌ Erreur RCON",
-      description: result.ok
-        ? `**${qte}x** \`${item}\` → **${joueur}**`
-        : `\`${result.error}\``,
-    })] });
-  }
-
-  if (cmd === "mc-tp") {
-    const joueur = interaction.options.getString("joueur");
-    const dest   = interaction.options.getString("destination");
-    await interaction.deferReply({ ephemeral: true });
-    const result = await rconExec(`tp ${joueur} ${dest}`);
-    return interaction.editReply({ embeds: [makeEmbed({
-      color: result.ok ? C.GREEN : C.RED,
-      title: result.ok ? "🌀 Téléportation effectuée !" : "❌ Erreur RCON",
-      description: result.ok
-        ? `**${joueur}** → **${dest}**`
-        : `\`${result.error}\``,
-    })] });
-  }
-
-  if (cmd === "mc-time") {
-    const moment = interaction.options.getString("moment");
-    const allowed = ["day", "night", "noon", "midnight"];
-    if (!allowed.includes(moment))
-      return interaction.reply({ content: `❌ Valeurs acceptées : ${allowed.join(", ")}`, ephemeral: true });
-    await interaction.deferReply({ ephemeral: true });
-    const result = await rconExec(`time set ${moment}`);
-    const emojis = { day: "☀️", night: "🌙", noon: "🌞", midnight: "🌚" };
-    return interaction.editReply({ embeds: [makeEmbed({
-      color: result.ok ? C.GOLD : C.RED,
-      title: result.ok ? `${emojis[moment]} Heure changée !` : "❌ Erreur RCON",
-      description: result.ok ? `L'heure est maintenant : **${moment}**` : `\`${result.error}\``,
-    })] });
-  }
-
-  if (cmd === "mc-weather") {
-    const type = interaction.options.getString("type");
-    const allowed = ["clear", "rain", "thunder"];
-    if (!allowed.includes(type))
-      return interaction.reply({ content: `❌ Valeurs acceptées : ${allowed.join(", ")}`, ephemeral: true });
-    await interaction.deferReply({ ephemeral: true });
-    const result = await rconExec(`weather ${type}`);
-    const emojis = { clear: "☀️", rain: "🌧️", thunder: "⛈️" };
-    return interaction.editReply({ embeds: [makeEmbed({
-      color: result.ok ? C.CYAN : C.RED,
-      title: result.ok ? `${emojis[type]} Météo changée !` : "❌ Erreur RCON",
-      description: result.ok ? `Météo : **${type}**` : `\`${result.error}\``,
-    })] });
-  }
-
-  if (cmd === "mc-objectif") {
-    const texte = interaction.options.getString("texte");
-    saveObjectif({ texte, updatedBy: interaction.user.id, updatedAt: Date.now() });
-    return interaction.reply({ embeds: [makeEmbed({
-      color: C.GOLD,
-      title: "🎯 Objectif mis à jour !",
-      description: `> ${texte}`,
-    })], ephemeral: true });
   }
 
 });
