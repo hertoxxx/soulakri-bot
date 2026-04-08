@@ -178,6 +178,23 @@ function getFalixHeaders() {
   };
 }
 
+async function getFalixNetworkInfo() {
+  try {
+    const res = await fetch(
+      `https://client.falixnodes.net/api/v1/servers/${C.FALIX_SERVER}/network/ports`,
+      { headers: getFalixHeaders() }
+    );
+    if (res.status === 401 || res.status === 403) return { ok: false, reason: "cookie_expired" };
+    if (!res.ok) return { ok: false, reason: "http_error", status: res.status };
+    const json = await res.json();
+    const primary = json.ports?.find(p => p.primary === true);
+    if (!primary) return { ok: false, reason: "no_primary_port" };
+    return { ok: true, ip: primary.ip, port: String(primary.port) };
+  } catch (err) {
+    return { ok: false, reason: "error", message: err.message };
+  }
+}
+
 // ============================================================
 //  FALIX API — lire le port Bedrock depuis config.yml
 // ============================================================
