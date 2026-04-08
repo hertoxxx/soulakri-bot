@@ -221,7 +221,7 @@ async function checkBedrockPort() {
   try {
     const res  = await fetch(`https://api.mcsrvstat.us/bedrock/3/${C.MC_IP}`);
     const data = await res.json();
-    if (!data || !data.online) return;
+    if (!data || !data.online) return; 
 
     const newIP   = data.ip || C.MC_IP;
     const newPort = String(data.port || "");
