@@ -199,30 +199,30 @@ async function getFalixNetworkInfo() {
 //  FALIX API — lire le port Bedrock depuis config.yml
 // ============================================================
 
-async function getFalixBedrockPort() {
-  try {
-    const res = await fetch(
-      `https://client.falixnodes.net/api/v1/servers/${C.FALIX_SERVER}/files/read?path=/plugins/Geyser-Spigot/config.yml`,
-      { headers: getFalixHeaders() }
-    );
-    if (res.status === 401 || res.status === 403) return { ok: false, reason: "cookie_expired" };
-    if (!res.ok) return { ok: false, reason: "http_error", status: res.status };
-    const json = await res.json();
-    const content = json.content || json;
-    if (typeof content !== "string") return { ok: false, reason: "invalid_content" };
+const networkResult = await getFalixNetworkInfo();
 
-    // Cherche le port sous la section "bedrock:" uniquement
-    const match = content.match(/^bedrock:\s*\n(?:.*\n)*?\s+port:\s*(\d+)/m);
-    // Fallback : premier port: trouvé
-    const fallbackMatch = content.match(/^\s*port:\s*(\d+)/m);
-    const port = match ? match[1] : (fallbackMatch ? fallbackMatch[1] : null);
-
-    return { ok: true, port, content };
-  } catch (err) {
-    console.error("[Falix] getFalixBedrockPort :", err.message);
-    return { ok: false, reason: "error", message: err.message };
+if (!networkResult.ok) {
+  if (networkResult.reason === "cookie_expired") {
+    console.warn("[Bedrock] Cookie expiré — surveillance impossible.");
+    const guild = client.guilds.cache.get(C.GUILD_ID);
+    const logCh = guild?.channels.cache.get(C.CHANNEL_LOGS);
+    if (logCh) {
+      const adminRole = guild.roles.cache.get(C.ROLE_ADMIN);
+      await logCh.send({
+        content: adminRole ? `${adminRole}` : "",
+        embeds: [makeEmbed({
+          color: C.RED,
+          title: "⚠️ Cookie FalixNodes expiré",
+          description: "Le bot ne peut plus surveiller le port Bedrock.\nUtilise `/set-cookie`",
+        })],
+      });
+    }
   }
+  return;
 }
+
+const newIP   = networkResult.ip;
+const newPort = networkResult.port;
 
 // ============================================================
 //  FALIX API — modifier le port Bedrock dans config.yml
@@ -297,7 +297,6 @@ async function checkBedrockPort() {
     const newPort = falixResult.port;
     if (!newPort) return;
 
-    const newIP = C.MC_BEDROCK_IP;
     try {
       const falixIPRes = await fetch(
         `https://client.falixnodes.net/api/v1/servers/${C.FALIX_SERVER}`,
@@ -764,11 +763,10 @@ client.on("interactionCreate", async (interaction) => {
   // ── /bedrock — lecture directe FalixNodes ────────────────
   if (cmd === "bedrock") {
     await interaction.deferReply();
-
-    const falixResult = await getFalixBedrockPort();
-
-    if (!falixResult.ok) {
-      // Fallback : cache local
+  
+    const networkResult = await getFalixNetworkInfo();
+  
+    if (!networkResult.ok) {
       const bd = loadBedrock();
       if (bd.port) {
         return interaction.editReply({ embeds: [makeEmbed({
@@ -777,8 +775,8 @@ client.on("interactionCreate", async (interaction) => {
           thumbnail: C.LOGO_URL,
           description: "⚠️ Données en cache (FalixNodes inaccessible)",
           fields: [
-            { name: "📡 Adresse IP", value: `\`\`\`${bd.ip || C.MC_IP}\`\`\``, inline: false },
-            { name: "🔌 Port",       value: `\`\`\`${bd.port}\`\`\``,           inline: false },
+            { name: "📡 Adresse IP", value: `\`\`\`${bd.ip}\`\`\``, inline: false },
+            { name: "🔌 Port",       value: `\`\`\`${bd.port}\`\`\``, inline: false },
             { name: "📅 Mis à jour", value: `<t:${Math.floor((bd.updatedAt || Date.now()) / 1000)}:R>`, inline: true },
           ],
         })] });
@@ -786,26 +784,22 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.editReply({ embeds: [makeEmbed({
         color: C.RED,
         title: "❌ Bedrock — Données indisponibles",
-        description: falixResult.reason === "cookie_expired"
+        description: networkResult.reason === "cookie_expired"
           ? "Cookie FalixNodes expiré. Un admin doit faire `/set-cookie`."
-          : "Impossible de récupérer les infos Bedrock pour l'instant.",
+          : "Impossible de récupérer les infos Bedrock.",
       })] });
     }
-
-    const port = falixResult.port;
-    const ip   = C.MC_IP;
-
-    // Sauvegarde en cache
-    saveBedrock({ ip, port, updatedAt: Date.now() });
-
+  
+    saveBedrock({ ip: networkResult.ip, port: networkResult.port, updatedAt: Date.now() });
+  
     return interaction.editReply({ embeds: [makeEmbed({
       color: C.GREEN,
       title: "📱 Connexion Bedrock — Soulakri",
       thumbnail: C.LOGO_URL,
       description: "Infos pour rejoindre depuis **Minecraft Bedrock** (PE, Console, Win10)",
       fields: [
-        { name: "📡 Adresse IP", value: `\`\`\`${ip}\`\`\``,   inline: false },
-        { name: "🔌 Port",       value: `\`\`\`${port}\`\`\``, inline: false },
+        { name: "📡 Adresse IP", value: `\`\`\`${networkResult.ip}\`\`\``,   inline: false },
+        { name: "🔌 Port",       value: `\`\`\`${networkResult.port}\`\`\``, inline: false },
         { name: "⚠️ Important",  value: "Le port change à chaque redémarrage du serveur MC.", inline: false },
         { name: "📡 Source",     value: "Lu en direct depuis FalixNodes ✅", inline: true },
         { name: "📅 Récupéré",   value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true },
