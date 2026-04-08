@@ -290,9 +290,15 @@ async function checkBedrockPort() {
     } catch {}
 
     const current = loadBedrock();
-    if (current.ip === newIP && current.port === newPort) return;
+    if (current.port && current.ip === newIP && current.port === newPort) return;
 
     console.log(`[Bedrock] Changement détecté : ${current.port} → ${newPort}`);
+    const updateResult = await updateGeyserPort(newPort);
+    if (!updateResult.ok) {
+      console.warn("[Bedrock] Échec écriture config.yml :", updateResult.reason);
+    } else {
+      console.log("[Bedrock] config.yml mis à jour ✅");
+    }
     saveBedrock({ ip: newIP, port: newPort, updatedAt: Date.now() });
 
     const guild = client.guilds.cache.get(C.GUILD_ID);
