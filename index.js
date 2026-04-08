@@ -293,8 +293,41 @@ async function checkBedrockPort() {
 }
 
 function startBedrockWatcher() {
+  postBedrockMessage(); // Affiche toujours au démarrage
   checkBedrockPort();
-  setInterval(checkBedrockPort, 60 * 60 * 1000);
+  setInterval(checkBedrockPort, 15 * 60 * 1000);
+}
+
+async function postBedrockMessage() {
+  try {
+    const bd = loadBedrock();
+    if (!bd.port) return; // Pas encore de données
+    const guild = client.guilds.cache.get(C.GUILD_ID);
+    const bedrockCh = guild?.channels.cache.get(C.CHANNEL_BEDROCK);
+    if (!bedrockCh) return;
+    const embed = makeEmbed({
+      color: C.GREEN,
+      title: "📱 Connexion Bedrock — Soulakri",
+      thumbnail: C.LOGO_URL,
+      description: "Infos pour rejoindre depuis **Minecraft Bedrock** (PE, Console, Win10)",
+      fields: [
+        { name: "📡 Adresse IP", value: `\`\`\`${bd.ip || C.MC_IP}\`\`\``, inline: false },
+        { name: "🔌 Port",       value: `\`\`\`${bd.port}\`\`\``,           inline: false },
+        { name: "⚠️ Info",       value: "Ces infos changent à chaque redémarrage du serveur MC.",  inline: false },
+        { name: "📅 Mis à jour", value: `<t:${Math.floor((bd.updatedAt || Date.now()) / 1000)}:R>`, inline: true },
+      ],
+    });
+    const pins  = await bedrockCh.messages.fetchPinned();
+    const myPin = pins.find(m => m.author.id === client.user.id);
+    if (myPin) {
+      await myPin.edit({ embeds: [embed] });
+    } else {
+      const msg = await bedrockCh.send({ embeds: [embed] });
+      await msg.pin().catch(() => {});
+    }
+  } catch (err) {
+    console.error("[Bedrock] postBedrockMessage :", err);
+  }
 }
 
 // ============================================================
