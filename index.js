@@ -1,6 +1,5 @@
 // ============================================================
-//  SOULAKRI BOT v10 — discord.js v14
-//  + Auto-update IP+port Bedrock via FalixNodes network/ports
+//  SOULAKRI BOT v11 — discord.js v14
 // ============================================================
 
 require("dotenv").config();
@@ -178,7 +177,7 @@ function getFalixHeaders() {
 }
 
 // ============================================================
-//  FALIX API — lire IP + port depuis network/ports
+//  FALIX API — lire IP + port
 // ============================================================
 
 async function getFalixNetworkInfo() {
@@ -199,13 +198,12 @@ async function getFalixNetworkInfo() {
 }
 
 // ============================================================
-//  AUTO BEDROCK — détection changement + mise à jour
+//  AUTO BEDROCK
 // ============================================================
 
 async function checkBedrockPort() {
   try {
     const networkResult = await getFalixNetworkInfo();
-
     if (!networkResult.ok) {
       if (networkResult.reason === "cookie_expired") {
         console.warn("[Bedrock] Cookie expiré — surveillance impossible.");
@@ -215,97 +213,56 @@ async function checkBedrockPort() {
           const adminRole = guild.roles.cache.get(C.ROLE_ADMIN);
           await logCh.send({
             content: adminRole ? `${adminRole}` : "",
-            embeds: [makeEmbed({
-              color: C.RED,
-              title: "⚠️ Cookie FalixNodes expiré",
-              description: "Le bot ne peut plus surveiller le port Bedrock.\nUtilise `/set-cookie`",
-            })],
+            embeds: [makeEmbed({ color: C.RED, title: "⚠️ Cookie FalixNodes expiré", description: "Le bot ne peut plus surveiller le port Bedrock.\nUtilise `/set-cookie`" })],
           });
         }
       }
       return;
     }
-
-    const newIP   = networkResult.ip;
-    const newPort = networkResult.port;
+    const newIP = networkResult.ip, newPort = networkResult.port;
     const current = loadBedrock();
-
     if (current.port && current.ip === newIP && current.port === newPort) return;
-
     console.log(`[Bedrock] Changement détecté : ${current.port || "inconnu"} → ${newPort}`);
     saveBedrock({ ip: newIP, port: newPort, updatedAt: Date.now() });
-
     const guild = client.guilds.cache.get(C.GUILD_ID);
     if (!guild) return;
-
     await postBedrockMessage(newIP, newPort);
-
     const logCh = guild.channels.cache.get(C.CHANNEL_LOGS);
     if (logCh) {
       const adminRole = guild.roles.cache.get(C.ROLE_ADMIN);
       await logCh.send({
         content: adminRole ? `${adminRole}` : "",
-        embeds: [makeEmbed({
-          color: C.ORANGE,
-          title: "⚠️ Port Bedrock changé — Redémarre le MC !",
-          description:
-            `**Ancien port :** \`${current.port || "inconnu"}\`\n` +
-            `**Nouveau port :** \`${newPort}\`\n` +
-            `**IP :** \`${newIP}\`\n\n` +
-            `🔄 **Redémarre le serveur MC** sur FalixNodes pour appliquer le changement.`,
-        })],
+        embeds: [makeEmbed({ color: C.ORANGE, title: "⚠️ Port Bedrock changé — Redémarre le MC !", description: `**Ancien port :** \`${current.port || "inconnu"}\`\n**Nouveau port :** \`${newPort}\`\n**IP :** \`${newIP}\`\n\n🔄 **Redémarre le serveur MC** sur FalixNodes pour appliquer le changement.` })],
       });
     }
-  } catch (err) {
-    console.error("[Bedrock] Erreur checkBedrockPort :", err);
-  }
+  } catch (err) { console.error("[Bedrock] Erreur checkBedrockPort :", err); }
 }
-
-// ============================================================
-//  POST / EDIT message épinglé #bedrock
-// ============================================================
 
 async function postBedrockMessage(ip, port) {
   try {
-    const guild     = client.guilds.cache.get(C.GUILD_ID);
+    const guild = client.guilds.cache.get(C.GUILD_ID);
     const bedrockCh = guild?.channels.cache.get(C.CHANNEL_BEDROCK);
     if (!bedrockCh) return;
-
     const embed = makeEmbed({
-      color: C.GREEN,
-      title: "📱 Connexion Bedrock — Soulakri",
-      thumbnail: C.LOGO_URL,
+      color: C.GREEN, title: "📱 Connexion Bedrock — Soulakri", thumbnail: C.LOGO_URL,
       description: "Infos pour rejoindre depuis **Minecraft Bedrock** (PE, Console, Win10) ✅",
       fields: [
-        { name: "📡 Adresse IP", value: `\`\`\`${ip}\`\`\``,   inline: false },
+        { name: "📡 Adresse IP", value: `\`\`\`${ip}\`\`\``, inline: false },
         { name: "🔌 Port",       value: `\`\`\`${port}\`\`\``, inline: false },
         { name: "⚠️ Info",       value: "Ces infos changent à chaque redémarrage du serveur MC. Ce message est mis à jour automatiquement.", inline: false },
         { name: "📅 Mis à jour", value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true },
       ],
     });
-
-    const pins  = await bedrockCh.messages.fetchPinned();
+    const pins = await bedrockCh.messages.fetchPinned();
     const myPin = pins.find(m => m.author.id === client.user.id);
-    if (myPin) {
-      await myPin.edit({ embeds: [embed] });
-    } else {
-      const msg = await bedrockCh.send({ embeds: [embed] });
-      await msg.pin().catch(() => {});
-    }
-  } catch (err) {
-    console.error("[Bedrock] postBedrockMessage :", err);
-  }
+    if (myPin) { await myPin.edit({ embeds: [embed] }); }
+    else { const msg = await bedrockCh.send({ embeds: [embed] }); await msg.pin().catch(() => {}); }
+  } catch (err) { console.error("[Bedrock] postBedrockMessage :", err); }
 }
-
-// ============================================================
-//  WATCHER — toutes les 15 min
-// ============================================================
 
 async function startBedrockWatcher() {
   const cached = loadBedrock();
-  if (cached.port) {
-    await postBedrockMessage(cached.ip || C.MC_IP, cached.port);
-  }
+  if (cached.port) await postBedrockMessage(cached.ip || C.MC_IP, cached.port);
   await checkBedrockPort();
   setInterval(checkBedrockPort, 15 * 60 * 1000);
 }
@@ -435,7 +392,7 @@ function startVittelBot() {
 const COMMANDS = [
   new SlashCommandBuilder().setName("help").setDescription("Affiche toutes les commandes"),
   new SlashCommandBuilder().setName("ip").setDescription("IP du serveur Minecraft"),
-  new SlashCommandBuilder().setName("bedrock").setDescription("📱 Infos connexion Bedrock (lu en direct)"),
+  new SlashCommandBuilder().setName("bedrock").setDescription("📱 Infos connexion Bedrock"),
   new SlashCommandBuilder().setName("serverinfo").setDescription("Infos du serveur Discord"),
   new SlashCommandBuilder().setName("grade").setDescription("Ton grade et niveau XP"),
   new SlashCommandBuilder()
@@ -453,6 +410,13 @@ const COMMANDS = [
   new SlashCommandBuilder()
     .setName("ratio").setDescription("☑️ Ratio quelqu'un")
     .addUserOption(o => o.setName("cible").setDescription("La victime").setRequired(true)),
+  new SlashCommandBuilder()
+    .setName("cracked").setDescription("💀 Cracked !")
+    .addStringOption(o => o.setName("pseudo").setDescription("Le pseudo cracké").setRequired(true)),
+  new SlashCommandBuilder().setName("bakri").setDescription("⚛️ M. Bakri — Prof de physique"),
+  new SlashCommandBuilder().setName("raoudi").setDescription("🎰 Le compte de Raoudi"),
+  new SlashCommandBuilder().setName("obled").setDescription("🐍 M. Obled — Python & Thonny"),
+  new SlashCommandBuilder().setName("bourgin").setDescription("🧱 WALL JUMP !"),
   new SlashCommandBuilder().setName("statserveur").setDescription("🌐 Statut du serveur Minecraft"),
   new SlashCommandBuilder().setName("joueurs").setDescription("👥 Joueurs connectés sur le MC"),
   new SlashCommandBuilder().setName("objectif").setDescription("🎯 Objectif actuel du serveur"),
@@ -474,7 +438,7 @@ const COMMANDS = [
   new SlashCommandBuilder()
     .setName("set-cookie").setDescription("🍪 Mettre à jour le cookie FalixNodes (Admin)")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addStringOption(o => o.setName("cookie").setDescription("Cookie complet : SESSION=xxx; LoggedIn=xxx; falix_registered=1").setRequired(true)),
+    .addStringOption(o => o.setName("cookie").setDescription("Cookie complet").setRequired(true)),
   new SlashCommandBuilder()
     .setName("reglement").setDescription("Poster le règlement (Admin)")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
@@ -482,7 +446,7 @@ const COMMANDS = [
     .setName("roles").setDescription("Poster le sélecteur de rôles (Admin)")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   new SlashCommandBuilder()
-    .setName("vittel").setDescription("Lancer Vittel BOT dans le salon maths (Admin)")
+    .setName("vittel").setDescription("Lancer Vittel BOT (Admin)")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   new SlashCommandBuilder().setName("ticket").setDescription("Ouvre un ticket support"),
   new SlashCommandBuilder()
@@ -646,6 +610,7 @@ client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   const cmd = interaction.commandName;
 
+  // ── HELP ──
   if (cmd === "help") {
     return interaction.reply({ embeds: [makeEmbed({
       color: C.BLUE, author: { name: "Soulakri Bot — Aide", iconURL: C.LOGO_URL },
@@ -654,7 +619,7 @@ client.on("interactionCreate", async (interaction) => {
         { name: "── 🎮 Minecraft ──",   value: "`/ip` · `/bedrock` · `/stats` · `/joueurs` · `/statserveur`", inline: false },
         { name: "── 🌐 Serveur ──",     value: "`/serverinfo`", inline: false },
         { name: "── 🏅 Profil ──",      value: "`/grade` · `/niveau` · `/top`", inline: false },
-        { name: "── 😂 Fun ──",         value: "`/blague` · `/soules` · `/giry` · `/67` · `/cassandre` · `/ratio`", inline: false },
+        { name: "── 😂 Fun ──",         value: "`/blague` · `/soules` · `/giry` · `/67` · `/cassandre` · `/ratio` · `/cracked` · `/bakri` · `/raoudi` · `/obled` · `/bourgin`", inline: false },
         { name: "── 🔧 Utilitaires ──", value: "`/objectif` · `/sondage` · `/rappel`", inline: false },
         { name: "── 🎫 Support ──",     value: "`/ticket`", inline: false },
         { name: "── 🔨 Modération ──",  value: "`/ban` · `/kick` · `/mute` · `/unmute`", inline: false },
@@ -663,56 +628,27 @@ client.on("interactionCreate", async (interaction) => {
     })], ephemeral: true });
   }
 
+  // ── IP ──
   if (cmd === "ip") {
     return interaction.reply({ embeds: [makeEmbed({ color: C.GOLD, author: { name: "Soulakri — Serveur Minecraft", iconURL: C.LOGO_URL }, title: "🎮 Rejoins le serveur !", thumbnail: C.LOGO_URL, description: "Compatible **Java & Bedrock** ⚔️", fields: [{ name: "📡 Adresse IP", value: `\`\`\`${C.MC_IP}\`\`\``, inline: false }, { name: "🔌 Port Java", value: `\`\`\`${C.MC_PORT}\`\`\``, inline: false }, { name: "📱 Port Bedrock", value: "Utilise `/bedrock` — change à chaque redémarrage !", inline: false }, { name: "📦 Version", value: "`1.20.1`", inline: true }, { name: "🌍 Mode", value: "`Survie Crossplay`", inline: true }] })] });
   }
 
+  // ── BEDROCK ──
   if (cmd === "bedrock") {
     await interaction.deferReply();
-
     const networkResult = await getFalixNetworkInfo();
-
     if (!networkResult.ok) {
       const bd = loadBedrock();
       if (bd.port) {
-        return interaction.editReply({ embeds: [makeEmbed({
-          color: C.ORANGE,
-          title: "📱 Connexion Bedrock — Soulakri",
-          thumbnail: C.LOGO_URL,
-          description: "⚠️ Données en cache (FalixNodes inaccessible)",
-          fields: [
-            { name: "📡 Adresse IP", value: `\`\`\`${bd.ip}\`\`\``, inline: false },
-            { name: "🔌 Port",       value: `\`\`\`${bd.port}\`\`\``, inline: false },
-            { name: "📅 Mis à jour", value: `<t:${Math.floor((bd.updatedAt || Date.now()) / 1000)}:R>`, inline: true },
-          ],
-        })] });
+        return interaction.editReply({ embeds: [makeEmbed({ color: C.ORANGE, title: "📱 Connexion Bedrock — Soulakri", thumbnail: C.LOGO_URL, description: "⚠️ Données en cache (FalixNodes inaccessible)", fields: [{ name: "📡 Adresse IP", value: `\`\`\`${bd.ip}\`\`\``, inline: false }, { name: "🔌 Port", value: `\`\`\`${bd.port}\`\`\``, inline: false }, { name: "📅 Mis à jour", value: `<t:${Math.floor((bd.updatedAt || Date.now()) / 1000)}:R>`, inline: true }] })] });
       }
-      return interaction.editReply({ embeds: [makeEmbed({
-        color: C.RED,
-        title: "❌ Bedrock — Données indisponibles",
-        description: networkResult.reason === "cookie_expired"
-          ? "Cookie FalixNodes expiré. Un admin doit faire `/set-cookie`."
-          : "Impossible de récupérer les infos Bedrock.",
-      })] });
+      return interaction.editReply({ embeds: [makeEmbed({ color: C.RED, title: "❌ Bedrock — Données indisponibles", description: networkResult.reason === "cookie_expired" ? "Cookie FalixNodes expiré. Un admin doit faire `/set-cookie`." : "Impossible de récupérer les infos Bedrock." })] });
     }
-
     saveBedrock({ ip: networkResult.ip, port: networkResult.port, updatedAt: Date.now() });
-
-    return interaction.editReply({ embeds: [makeEmbed({
-      color: C.GREEN,
-      title: "📱 Connexion Bedrock — Soulakri",
-      thumbnail: C.LOGO_URL,
-      description: "Infos pour rejoindre depuis **Minecraft Bedrock** (PE, Console, Win10)",
-      fields: [
-        { name: "📡 Adresse IP", value: `\`\`\`${networkResult.ip}\`\`\``,   inline: false },
-        { name: "🔌 Port",       value: `\`\`\`${networkResult.port}\`\`\``, inline: false },
-        { name: "⚠️ Important",  value: "Le port change à chaque redémarrage du serveur MC.", inline: false },
-        { name: "📡 Source",     value: "Lu en direct depuis FalixNodes ✅", inline: true },
-        { name: "📅 Récupéré",   value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true },
-      ],
-    })] });
+    return interaction.editReply({ embeds: [makeEmbed({ color: C.GREEN, title: "📱 Connexion Bedrock — Soulakri", thumbnail: C.LOGO_URL, description: "Infos pour rejoindre depuis **Minecraft Bedrock** (PE, Console, Win10)", fields: [{ name: "📡 Adresse IP", value: `\`\`\`${networkResult.ip}\`\`\``, inline: false }, { name: "🔌 Port", value: `\`\`\`${networkResult.port}\`\`\``, inline: false }, { name: "⚠️ Important", value: "Le port change à chaque redémarrage du serveur MC.", inline: false }, { name: "📡 Source", value: "Lu en direct depuis FalixNodes ✅", inline: true }, { name: "📅 Récupéré", value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true }] })] });
   }
 
+  // ── SERVERINFO ──
   if (cmd === "serverinfo") {
     await interaction.deferReply();
     const guild = interaction.guild;
@@ -723,6 +659,7 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ embeds: [makeEmbed({ color: C.CYAN, author: { name: guild.name, iconURL: guild.iconURL({ dynamic: true }) || C.LOGO_URL }, title: "🌐 Informations du serveur", thumbnail: guild.iconURL({ dynamic: true, size: 256 }) || C.LOGO_URL, fields: [{ name: "👑 Propriétaire", value: owner.toString(), inline: true }, { name: "📅 Créé le", value: `<t:${Math.floor(guild.createdTimestamp / 1000)}:D>`, inline: true }, { name: "🆔 ID", value: `\`${guild.id}\``, inline: true }, { name: "👥 Membres", value: `👤 ${humans} humains\n🤖 ${bots} bots`, inline: true }, { name: "💬 Salons", value: `📝 ${texts} texte\n🔊 ${voices} vocal`, inline: true }, { name: "🎭 Rôles", value: `${guild.roles.cache.size - 1}`, inline: true }, { name: "🚀 Boosts", value: `${guild.premiumSubscriptionCount} — Niv. ${guild.premiumTier}`, inline: true }, { name: "🔒 Vérification", value: verif, inline: true }, { name: "🎮 Serveur MC", value: `\`${C.MC_IP}:${C.MC_PORT}\``, inline: true }] })] });
   }
 
+  // ── GRADE ──
   if (cmd === "grade") {
     const gradeRoles = ["Admin", "Mod", "Builder", "MVP", "VIP", "Joueur"];
     let found = null;
@@ -731,18 +668,21 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply({ embeds: [makeEmbed({ color: found ? (found.color || C.BLUE) : C.RED, author: { name: interaction.user.username, iconURL: interaction.user.displayAvatarURL({ dynamic: true }) }, title: "🏅 Ton profil Soulakri", thumbnail: interaction.user.displayAvatarURL({ dynamic: true }), fields: [{ name: "🎖️ Grade", value: found ? found.toString() : "*Aucun grade*", inline: true }, { name: "⭐ Niveau", value: `**${user.level}**`, inline: true }, { name: "💬 Messages", value: `${user.messages}`, inline: true }, { name: `📊 XP — ${user.xp} / ${needed} (${pct}%)`, value: `\`${bar}\``, inline: false }] })], ephemeral: true });
   }
 
+  // ── NIVEAU ──
   if (cmd === "niveau") {
     const target = interaction.options.getUser("joueur") || interaction.user;
     const user = getUser(target.id), needed = xpForLevel(user.level), bar = progressBar(user.xp, needed), pct = Math.round((user.xp / needed) * 100);
     return interaction.reply({ embeds: [makeEmbed({ color: C.PURPLE, author: { name: target.username, iconURL: target.displayAvatarURL({ dynamic: true }) }, title: `⭐ Niveau de ${target.username}`, thumbnail: target.displayAvatarURL({ dynamic: true }), fields: [{ name: "⭐ Niveau", value: `**${user.level}**`, inline: true }, { name: "✨ XP", value: `${user.xp} / ${needed}`, inline: true }, { name: "💬 Messages", value: `${user.messages}`, inline: true }, { name: `📊 Progression — ${pct}%`, value: `\`${bar}\``, inline: false }] })] });
   }
 
+  // ── TOP ──
   if (cmd === "top") {
     const sorted = Object.entries(xpData).map(([id, d]) => ({ id, ...d })).sort((a, b) => b.level - a.level || b.xp - a.xp).slice(0, 10);
     const medals = ["🥇", "🥈", "🥉"];
     return interaction.reply({ embeds: [makeEmbed({ color: C.GOLD, author: { name: "Soulakri — Classement XP", iconURL: C.LOGO_URL }, title: "🏆 Top 10 joueurs", thumbnail: C.LOGO_URL, description: sorted.length ? sorted.map((u, i) => `${medals[i] || `**${i + 1}.**`} <@${u.id}> — Niv. **${u.level}** · ${u.xp} XP`).join("\n") : "*Aucun joueur dans le classement.*" })] });
   }
 
+  // ── STATS ──
   if (cmd === "stats") {
     const pseudo = interaction.options.getString("pseudo");
     await interaction.deferReply();
@@ -754,16 +694,19 @@ client.on("interactionCreate", async (interaction) => {
     } catch { return interaction.editReply({ content: "❌ Erreur API Mojang. Réessaie." }); }
   }
 
+  // ── BLAGUE ──
   if (cmd === "blague") {
     const b = BLAGUES[Math.floor(Math.random() * BLAGUES.length)];
     return interaction.reply({ embeds: [makeEmbed({ color: C.ORANGE, title: "😂 Blague Minecraft", thumbnail: C.LOGO_URL, fields: [{ name: "❓ Question", value: b.joke }, { name: "💡 Réponse", value: b.answer }] })], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("another_joke").setLabel("😂 Une autre !").setStyle(ButtonStyle.Primary))] });
   }
 
+  // ── FUN CLASSIQUE ──
   if (cmd === "soules")    return interaction.reply({ embeds: [makeEmbed({ color: 0xFF6600, title: "🔥 FLASH OUT ! Soules balance une flash !", description: `${interaction.user} invoque **SOULES** ! 🌟\n*Run it back !*`, image: "https://i.imgur.com/FLkhWWO.gif" }).setFooter({ text: C.FOOTER, iconURL: C.LOGO_URL })] });
   if (cmd === "giry")      return interaction.reply({ embeds: [makeEmbed({ color: 0x4CAF50, title: "💚 SEEKERS OUT ! Giry envoie la flash de Skye !", description: `${interaction.user} joue **GIRY** ! 🦅\n*T'as les yeux dans ta poche !*`, image: "https://i.imgur.com/3h3Y01m.gif" }).setFooter({ text: C.FOOTER, iconURL: C.LOGO_URL })] });
   if (cmd === "67")        return interaction.reply({ embeds: [makeEmbed({ color: 0xFFD700, title: "🎲 SIX SEVEN ! 67 !", description: `${interaction.user} sort le **67** ! 🎵`, image: "https://i.imgur.com/tTLkRlr.gif" }).setFooter({ text: C.FOOTER, iconURL: C.LOGO_URL })] });
   if (cmd === "cassandre") return interaction.reply({ embeds: [makeEmbed({ color: 0xB8860B, title: "🔗 NEURAL THEFT ! Cassandre sort Deadlock !", description: `${interaction.user} joue **CASSANDRE** ! ⛓️\n*GravNet lancé !*`, image: "https://i.imgur.com/3D8zQTb.gif" }).setFooter({ text: C.FOOTER, iconURL: C.LOGO_URL })] });
 
+  // ── RATIO ──
   if (cmd === "ratio") {
     const cible = interaction.options.getUser("cible");
     if (cible.id === interaction.user.id) return interaction.reply({ content: "❌ Tu peux pas te ratio toi-même...", ephemeral: true });
@@ -771,6 +714,100 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply({ embeds: [makeEmbed({ color: C.CYAN, title: "☑️ Ratio", description: `${interaction.user} vient de **ratio** ${cible} ! 📉\n\n> *${cible.username} : "${reactions[Math.floor(Math.random() * reactions.length)]}"*`, thumbnail: cible.displayAvatarURL({ dynamic: true }) })] });
   }
 
+  // ── CRACKED ──
+  if (cmd === "cracked") {
+    const pseudo = interaction.options.getString("pseudo");
+    return interaction.reply({ embeds: [makeEmbed({
+      color: C.RED,
+      title: "💀 CRACKED !",
+      description: `**${pseudo}** vient de se faire **crack** par ${interaction.user} ! 😭\n\n> *T'as même pas de licence originale frère...*`,
+      thumbnail: `https://mc-heads.net/avatar/${pseudo}/64`,
+      fields: [
+        { name: "👤 Victime", value: `\`${pseudo}\``, inline: true },
+        { name: "⚖️ Verdict", value: "`Piraté ✅`", inline: true },
+        { name: "🔑 Licence", value: "`Introuvable 💀`", inline: true },
+      ],
+    })] });
+  }
+
+  // ── BAKRI ──
+  if (cmd === "bakri") {
+    return interaction.reply({ embeds: [makeEmbed({
+      color: 0x00BFFF,
+      title: "⚛️ M. Bakri — Cours de Physique",
+      description: `${interaction.user} invoque **M. Bakri** ! 🧪\n\n> *"Alors, qui peut me rappeler la formule ?"*\n> *RKO depuis le bureau* 🪑💥\n\n**Bakri m'a mis un RKO** — comme dirait le serveur.`,
+      thumbnail: C.LOGO_URL,
+      fields: [
+        { name: "📚 Matière", value: "`Physique-Chimie`", inline: true },
+        { name: "🥋 Technique", value: "`RKO niveau 5`", inline: true },
+        { name: "📊 Note de cours", value: "`0/20 (absent)`", inline: true },
+      ],
+    })] });
+  }
+
+  // ── RAOUDI ──
+  if (cmd === "raoudi") {
+    await interaction.deferReply();
+    const target = await interaction.guild.members.fetch("852993628242575390").catch(() => null);
+    return interaction.editReply({ embeds: [makeEmbed({
+      color: C.GOLD,
+      title: "🎰 Le Compte de Raoudi",
+      author: target
+        ? { name: target.user.username, iconURL: target.user.displayAvatarURL({ dynamic: true }) }
+        : { name: "Raoudi", iconURL: C.LOGO_URL },
+      description: target
+        ? `Voilà le fameux **${target.user.username}** ! 👀\n\n> *"C'est moi le vrai Raoudi."* 😎`
+        : `❌ Raoudi s'est **barré** ou est introuvable... 💀`,
+      thumbnail: target ? target.user.displayAvatarURL({ dynamic: true }) : C.LOGO_URL,
+      fields: target ? [
+        { name: "🏷️ Tag",                value: `\`${target.user.tag}\``,                                           inline: true },
+        { name: "📅 Sur le serveur depuis", value: `<t:${Math.floor(target.joinedTimestamp / 1000)}:R>`,             inline: true },
+        { name: "🎭 Rôles",              value: `${target.roles.cache.size - 1}`,                                    inline: true },
+      ] : [],
+    })] });
+  }
+
+  // ── OBLED ──
+  if (cmd === "obled") {
+    const codes = [
+      "print('Bonjour M. Obled')",
+      "while True:\n    print('Thonny crash encore')",
+      "import thonny\nthonny.launch()  # ça marche jamais",
+      "x = input('Entrez une valeur : ')\nprint(x * 2)  # TypeError intensifies",
+      "def cours_python():\n    pass  # TODO: comprendre",
+      "for i in range(99999):\n    print('M. Obled explique encore les variables')",
+    ];
+    const code = codes[Math.floor(Math.random() * codes.length)];
+    return interaction.reply({ embeds: [makeEmbed({
+      color: 0x3776AB,
+      title: "🐍 M. Obled — Cours de Python",
+      description: `${interaction.user} ouvre **Thonny**... 💻\n\n\`\`\`python\n${code}\n\`\`\`\n> *"Alors, vous voyez l'erreur ?"* 🤓`,
+      thumbnail: C.LOGO_URL,
+      fields: [
+        { name: "🛠️ IDE",       value: "`Thonny 4.x`",      inline: true },
+        { name: "🐍 Langage",   value: "`Python 3`",         inline: true },
+        { name: "📊 TPS cours", value: "`2.0 (ça lag)`",     inline: true },
+      ],
+    })] });
+  }
+
+  // ── BOURGIN ──
+  if (cmd === "bourgin") {
+    const reussi = Math.random() > 0.4;
+    return interaction.reply({ embeds: [makeEmbed({
+      color: 0x8B4513,
+      title: "🧱 WALL JUMP !!!",
+      description: `${interaction.user} tente le **WALL JUMP** ! 🏃💨\n\n> *Appuie sur espace au bon moment...*\n\n${reussi ? "**BOING** 🚀 — Saut réussi ! M. Bourgin est fier." : "**SPLAT** 💀 — Raté. Le mur dit non."}`,
+      thumbnail: C.LOGO_URL,
+      fields: [
+        { name: "🧱 Mur touché",   value: "`Oui`",                                      inline: true },
+        { name: "🦘 Saut réussi",  value: reussi ? "`OUI 🎉`" : "`NON 💀`",             inline: true },
+        { name: "📐 Angle",        value: `\`${Math.floor(Math.random() * 90)}°\``,      inline: true },
+      ],
+    })] });
+  }
+
+  // ── JOUEURS ──
   if (cmd === "joueurs") {
     await interaction.deferReply();
     const data = await getServerData();
@@ -779,6 +816,7 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ embeds: [makeEmbed({ color: C.GREEN, title: "👥 Joueurs connectés sur Soulakri", thumbnail: C.LOGO_URL, description: players, fields: [{ name: "👤 En ligne", value: `**${data.players?.online ?? 0}** / ${data.players?.max ?? 0}`, inline: true }, { name: "🎮 IP", value: `\`${C.MC_IP}:${C.MC_PORT}\``, inline: true }, { name: "📦 Version", value: `\`${data.version ?? "?"}\``, inline: true }] })] });
   }
 
+  // ── STATSERVEUR ──
   if (cmd === "statserveur") {
     await interaction.deferReply();
     const data = await getServerData();
@@ -786,11 +824,13 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ embeds: [makeEmbed({ color: C.CYAN, title: "🌐 Statut du serveur Soulakri", thumbnail: C.LOGO_URL, description: "Le serveur est **en ligne** ✅", fields: [{ name: "👤 Joueurs", value: `${data.players?.online ?? 0} / ${data.players?.max ?? 0}`, inline: true }, { name: "📦 Version", value: `\`${data.version ?? "?"}\``, inline: true }, { name: "🏓 MOTD", value: data.motd?.clean?.[0] ?? "Soulakri MC", inline: false }, { name: "🎮 IP", value: `\`${C.MC_IP}:${C.MC_PORT}\``, inline: true }] })] });
   }
 
+  // ── OBJECTIF ──
   if (cmd === "objectif") {
     const obj = loadObjectif();
     return interaction.reply({ embeds: [makeEmbed({ color: C.GOLD, title: "🎯 Objectif actuel — Soulakri", description: `> ${obj.texte}`, thumbnail: C.LOGO_URL, fields: obj.updatedBy ? [{ name: "✏️ Mis à jour par", value: `<@${obj.updatedBy}>`, inline: true }, { name: "📅 Le", value: `<t:${Math.floor(obj.updatedAt / 1000)}:D>`, inline: true }] : [] })] });
   }
 
+  // ── SONDAGE ──
   if (cmd === "sondage") {
     const question = interaction.options.getString("question");
     const choix = [1,2,3,4].map(i => interaction.options.getString(`choix${i}`)).filter(Boolean);
@@ -801,6 +841,7 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
+  // ── RAPPEL ──
   if (cmd === "rappel") {
     const minutes = interaction.options.getInteger("minutes"), message = interaction.options.getString("message");
     if (minutes < 1 || minutes > 1440) return interaction.reply({ content: "❌ Entre 1 et 1440 minutes (24h max).", ephemeral: true });
@@ -812,24 +853,23 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
+  // ── MC-OBJECTIF ──
   if (cmd === "mc-objectif") {
     const texte = interaction.options.getString("texte");
     saveObjectif({ texte, updatedBy: interaction.user.id, updatedAt: Date.now() });
     return interaction.reply({ embeds: [makeEmbed({ color: C.GOLD, title: "🎯 Objectif mis à jour !", description: `> ${texte}` })], ephemeral: true });
   }
 
+  // ── SET-COOKIE ──
   if (cmd === "set-cookie") {
     const cookie = interaction.options.getString("cookie");
     process.env.FALIX_SESSION = cookie;
     fs.writeFileSync("./falix_session.txt", cookie);
     checkBedrockPort().catch(console.error);
-    return interaction.reply({ embeds: [makeEmbed({
-      color: C.GREEN,
-      title: "🍪 Cookie FalixNodes mis à jour !",
-      description: "✅ Cookie mis à jour en mémoire et sauvegardé.\n🔄 Vérification du port Bedrock relancée...\n⚠️ Pense aussi à mettre à jour `FALIX_SESSION` dans Railway pour persister après redéploiement.",
-    })], ephemeral: true });
+    return interaction.reply({ embeds: [makeEmbed({ color: C.GREEN, title: "🍪 Cookie FalixNodes mis à jour !", description: "✅ Cookie mis à jour en mémoire et sauvegardé.\n🔄 Vérification du port Bedrock relancée...\n⚠️ Pense aussi à mettre à jour `FALIX_SESSION` dans Railway pour persister après redéploiement." })], ephemeral: true });
   }
 
+  // ── REGLEMENT ──
   if (cmd === "reglement") {
     const ch = interaction.guild.channels.cache.get(C.CHANNEL_REGLEMENT);
     if (!ch) return interaction.reply({ content: "❌ Salon règlement introuvable.", ephemeral: true });
@@ -838,6 +878,7 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply({ content: `✅ Règlement posté dans <#${C.CHANNEL_REGLEMENT}> !`, ephemeral: true });
   }
 
+  // ── ROLES ──
   if (cmd === "roles") {
     const ch = interaction.guild.channels.cache.get(C.CHANNEL_ROLES);
     if (!ch) return interaction.reply({ content: "❌ Salon rôles introuvable.", ephemeral: true });
@@ -852,6 +893,7 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply({ content: `✅ Sélecteur posté dans <#${C.CHANNEL_ROLES}> !`, ephemeral: true });
   }
 
+  // ── VITTEL ──
   if (cmd === "vittel") {
     const ch = interaction.guild.channels.cache.get(C.CHANNEL_MATHS);
     if (!ch) return interaction.reply({ content: "❌ Salon maths introuvable.", ephemeral: true });
@@ -860,6 +902,7 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply({ content: `✅ Question lancée dans <#${C.CHANNEL_MATHS}> !`, ephemeral: true });
   }
 
+  // ── TICKET ──
   if (cmd === "ticket") {
     try {
       const guild = interaction.guild, member = interaction.member;
@@ -878,6 +921,7 @@ client.on("interactionCreate", async (interaction) => {
     } catch (err) { console.error("/ticket :", err); if (!interaction.replied) return interaction.reply({ content: "❌ Impossible de créer le ticket.", ephemeral: true }); }
   }
 
+  // ── BAN ──
   if (cmd === "ban") {
     const target = interaction.options.getMember("membre"), raison = interaction.options.getString("raison") || "Aucune raison fournie";
     if (!target?.bannable) return interaction.reply({ content: "❌ Impossible de bannir ce membre.", ephemeral: true });
@@ -889,6 +933,7 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
+  // ── KICK ──
   if (cmd === "kick") {
     const target = interaction.options.getMember("membre"), raison = interaction.options.getString("raison") || "Aucune raison fournie";
     if (!target?.kickable) return interaction.reply({ content: "❌ Impossible d'expulser ce membre.", ephemeral: true });
@@ -900,6 +945,7 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
+  // ── MUTE ──
   if (cmd === "mute") {
     const target = interaction.options.getMember("membre"), minutes = interaction.options.getInteger("minutes"), raison = interaction.options.getString("raison") || "Aucune raison fournie";
     if (!target) return interaction.reply({ content: "❌ Membre introuvable.", ephemeral: true });
@@ -912,6 +958,7 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
+  // ── UNMUTE ──
   if (cmd === "unmute") {
     const target = interaction.options.getMember("membre");
     if (!target) return interaction.reply({ content: "❌ Membre introuvable.", ephemeral: true });
