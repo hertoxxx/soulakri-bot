@@ -289,14 +289,8 @@ try {
 }
 
 const SOUNDS = {
-  bakri:   `${C.SOUNDS_BASE}/bakri.mp3`,
-  naim:    `${C.SOUNDS_BASE}/naim.mp3`,
-  soules:  `${C.SOUNDS_BASE}/soules.mp3`,
-  giry:    `${C.SOUNDS_BASE}/giry.mp3`,
-  bobard:  `${C.SOUNDS_BASE}/bobard.mp3`,
-  bourgin: `${C.SOUNDS_BASE}/bourgin.mp3`,
-  obled:   `${C.SOUNDS_BASE}/obled.mp3`,
-  raoudi:  `${C.SOUNDS_BASE}/raoudi.mp3`,
+  bakri: `${C.SOUNDS_BASE}/bakri.mp3`,
+  naim:  `${C.SOUNDS_BASE}/naim.mp3`,
 };
 
 // Joue un son dans le vocal de l'utilisateur puis quitte
