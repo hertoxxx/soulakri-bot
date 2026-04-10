@@ -1,11 +1,5 @@
 // ============================================================
 //  SOULAKRI BOT v12 — discord.js v14
-//  Nouveautés : /warn /warns /clearwarn /giveaway /dodge
-//               /bobard /naim /config (panel admin complet)
-//               Descamps BOT / LeTarnec BOT / /tarnec-theme
-//               Système audio vocal (@discordjs/voice + ffmpeg)
-//               /top pagination / /ticket transcript
-//               MP3 en pièce jointe pour commandes fun
 // ============================================================
 
 require("dotenv").config();
