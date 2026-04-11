@@ -3,6 +3,8 @@
 // ============================================================
 
 require("dotenv").config();
+const sodium = require("libsodium-wrappers");
+sodium.ready.then(() => console.log("[Audio] libsodium prêt ✅"));
 const fs   = require("fs");
 const path = require("path");
 const {
