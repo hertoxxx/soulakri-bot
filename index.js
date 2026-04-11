@@ -19,6 +19,7 @@ const {
 //  CONFIG
 // ============================================================
 
+process.env.FFMPEG_PATH = require("ffmpeg-static");
 const C = {
   GUILD_ID:           "1487136081152577556",
   CHANNEL_REGLEMENT:  "1487136083627086010",
@@ -333,8 +334,15 @@ async function playInVoice(member, soundUrl) {
 
     await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
 
+    // ✅ FIX : fetch le fichier et passer un stream lisible
+    const res = await fetch(soundUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { Readable } = require("stream");
+    const webStream = res.body;
+    const nodeStream = Readable.fromWeb(webStream);
+
     const player   = createAudioPlayer();
-    const resource = createAudioResource(soundUrl);
+    const resource = createAudioResource(nodeStream);
     player.play(resource);
     connection.subscribe(player);
 
