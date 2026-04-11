@@ -1785,41 +1785,57 @@ client.on("interactionCreate", async (interaction) => {
     const pseudo = interaction.options.getString("pseudo");
     return interaction.reply({ embeds: [makeEmbed({ color: C.RED, title: "💀 CRACKED !", description: `**${pseudo}** vient de se faire **crack** par ${interaction.user} ! 😭\n\n> *T'as même pas de licence originale frère...*`, thumbnail: `https://mc-heads.net/avatar/${pseudo}/64`, fields: [{ name: "👤 Victime", value: `\`${pseudo}\``, inline: true }, { name: "⚖️ Verdict", value: "`Piraté ✅`", inline: true }, { name: "🔑 Licence", value: "`Introuvable 💀`", inline: true }] })] });
   }
-
-  // ══════════════════════════════════════════════════════════
-  //  BAKRI — vocal + son (SEULE commande avec feature son)
+ // ══════════════════════════════════════════════════════════
+  //  BAKRI — vocal + son
   // ══════════════════════════════════════════════════════════
   if (cmd === "bakri") {
     await interaction.deferReply();
     const audioResult = await playInVoice(interaction.member, SOUNDS.bakri);
-    if (!audioResult.ok && audioResult.reason === "not_in_voice") {
+    const bakriEmbed = makeEmbed({
+      color: 0x00BFFF, title: "⚛️ M. Bakri — Cours de Physique",
+      description: `${interaction.user} invoque **M. Bakri** ! 🧪\n\n> *"Alors, qui peut me rappeler la formule ?"*\n> *RKO depuis le bureau* 🪑💥`,
+      thumbnail: C.LOGO_URL,
+      fields: [
+        { name: "📚 Matière", value: "`Physique-Chimie`", inline: true },
+        { name: "🥋 Technique", value: "`RKO niveau 5`", inline: true },
+        { name: "🔊 Audio", value: audioResult.ok ? "✅ Son joué en vocal !" : "⚠️ Pas en vocal — son envoyé ici.", inline: true },
+      ],
+    });
+
+    if (!audioResult.ok) {
       const attachment = await sendMp3Attachment(interaction, "bakri", "bakri.mp3");
-      const payload = {
-        embeds: [makeEmbed({ color: 0x00BFFF, title: "⚛️ M. Bakri — Cours de Physique", description: `${interaction.user} invoque **M. Bakri** ! 🧪\n\n> *"Alors, qui peut me rappeler la formule ?"*\n> *RKO depuis le bureau* 🪑💥`, thumbnail: C.LOGO_URL, fields: [{ name: "📚 Matière", value: "`Physique-Chimie`", inline: true }, { name: "🥋 Technique", value: "`RKO niveau 5`", inline: true }, { name: "🔊 Audio", value: "⚠️ Rejoins un vocal ! Son envoyé ici.", inline: true }] })],
-      };
+      const payload = { embeds: [bakriEmbed] };
       if (attachment) payload.files = [attachment];
       return interaction.editReply(payload);
     }
-    return interaction.editReply({ embeds: [makeEmbed({ color: 0x00BFFF, title: "⚛️ M. Bakri — Cours de Physique", description: `${interaction.user} invoque **M. Bakri** ! 🧪\n\n> *"Alors, qui peut me rappeler la formule ?"*\n> *RKO depuis le bureau* 🪑💥`, thumbnail: C.LOGO_URL, fields: [{ name: "📚 Matière", value: "`Physique-Chimie`", inline: true }, { name: "🥋 Technique", value: "`RKO niveau 5`", inline: true }, { name: "🔊 Audio", value: audioResult.ok ? "✅ Son joué en vocal !" : "⚠️ Erreur audio.", inline: true }] })] });
+    return interaction.editReply({ embeds: [bakriEmbed] });
   }
 
   // ══════════════════════════════════════════════════════════
-  //  NAIM — vocal + son (SEULE commande avec feature son)
+  //  NAIM — vocal + son
   // ══════════════════════════════════════════════════════════
   if (cmd === "naim") {
     await interaction.deferReply();
     const audioResult = await playInVoice(interaction.member, SOUNDS.naim);
-    if (!audioResult.ok && audioResult.reason === "not_in_voice") {
+    const naimEmbed = makeEmbed({
+      color: C.PURPLE, title: "🎤 Naim — Le son du goat",
+      description: `${interaction.user} balance le son de **Naim** ! 🔥\n\n> *C'est lui le vrai goat, tout le monde le sait.*\n> *Le son résonne dans tout le vocal.* 🎵`,
+      thumbnail: C.LOGO_URL,
+      fields: [
+        { name: "🎤 Artiste", value: "`Naim`", inline: true },
+        { name: "🎵 Qualité", value: "`Banger absolu`", inline: true },
+        { name: "🔊 Audio", value: audioResult.ok ? "✅ Son joué en vocal !" : "⚠️ Pas en vocal — son envoyé ici.", inline: true },
+      ],
+    });
+
+    if (!audioResult.ok) {
       const attachment = await sendMp3Attachment(interaction, "naim", "naim.mp3");
-      const payload = {
-        embeds: [makeEmbed({ color: C.PURPLE, title: "🎤 Naim — Le son du goat", description: `${interaction.user} balance le son de **Naim** ! 🔥\n\n> *C'est lui le vrai goat, tout le monde le sait.*\n> *Le son résonne dans tout le vocal.* 🎵`, thumbnail: C.LOGO_URL, fields: [{ name: "🎤 Artiste", value: "`Naim`", inline: true }, { name: "🎵 Qualité", value: "`Banger absolu`", inline: true }, { name: "🔊 Audio", value: "⚠️ Rejoins un vocal ! Son envoyé ici.", inline: true }] })],
-      };
+      const payload = { embeds: [naimEmbed] };
       if (attachment) payload.files = [attachment];
       return interaction.editReply(payload);
     }
-    return interaction.editReply({ embeds: [makeEmbed({ color: C.PURPLE, title: "🎤 Naim — Le son du goat", description: `${interaction.user} balance le son de **Naim** ! 🔥\n\n> *C'est lui le vrai goat, tout le monde le sait.*\n> *Le son résonne dans tout le vocal.* 🎵`, thumbnail: C.LOGO_URL, fields: [{ name: "🎤 Artiste", value: "`Naim`", inline: true }, { name: "🎵 Qualité", value: "`Banger absolu`", inline: true }, { name: "🔊 Audio", value: audioResult.ok ? "✅ Son joué en vocal !" : "⚠️ Erreur audio.", inline: true }] })] });
+    return interaction.editReply({ embeds: [naimEmbed] });
   }
-
   // ══════════════════════════════════════════════════════════
   //  BOBARD — sans son
   // ══════════════════════════════════════════════════════════
