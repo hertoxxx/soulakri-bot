@@ -1,5 +1,5 @@
 // ============================================================
-//  SOULAKRI BOT v12 — discord.js v14
+//  SOULAKRI BOT v13 — discord.js v14
 // ============================================================
 
 require("dotenv").config();
@@ -10,6 +10,7 @@ const {
   EmbedBuilder, ButtonBuilder, ButtonStyle,
   ActionRowBuilder, SlashCommandBuilder,
   StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
+  ModalBuilder, TextInputBuilder, TextInputStyle,
   REST, Routes, ChannelType, PermissionFlagsBits,
   AttachmentBuilder,
 } = require("discord.js");
@@ -28,6 +29,7 @@ const C = {
   CHANNEL_BEDROCK:    "1487136084214157382",
   CHANNEL_DESCAMPS:   "1492215799522263111",
   CHANNEL_TARNEC:     "1492216229178380419",
+  CHANNEL_OBJECTIF:   "1489929567505485954",
 
   ROLE_JOUEUR:       "1489335006290776174",
   ROLE_NON_VERIFIE:  "1489335084568936498",
@@ -62,10 +64,9 @@ const C = {
   VITTEL_INTERVAL_MS: 5 * 60 * 1000,
   VITTEL_TIMEOUT_MS:  60 * 1000,
 
-  // GitHub raw base — remplace TON_USER/TON_REPO par ton vrai repo
   SOUNDS_BASE: "https://raw.githubusercontent.com/hertoxxx/soulakri-bot/main/sounds",
 
-  MAX_WARNS: 3,
+  MAX_WARNS:    3,
   TOP_PAGE_SIZE: 10,
 };
 
@@ -162,7 +163,26 @@ function removeWarn(userId, warnId) {
 }
 
 // ============================================================
-//  CONFIG BOT (Descamps, Tarnec, intervalles)
+//  BLAGUES (persistantes)
+// ============================================================
+
+const BLAGUES_FILE = "./blagues.json";
+const BLAGUES_DEFAULT = [
+  { joke: "Pourquoi Creeper est toujours seul ?",               answer: "Parce qu'il fait exploser toutes ses relations ! 💥" },
+  { joke: "Comment s'appelle un joueur Minecraft qui pleure ?", answer: "Un mineur en larmes ! ⛏️" },
+  { joke: "Quel est le sport préféré des Endermen ?",           answer: "La téléportation marathon ! 🏃" },
+  { joke: "Pourquoi Steve ne sourit jamais ?",                  answer: "Parce qu'il a perdu ses diamonds dans la lave ! 💎" },
+  { joke: "Pourquoi les Zombies n'aiment pas le soleil ?",      answer: "Parce qu'il leur tape sur les nerfs… et sur la peau ! ☀️" },
+];
+
+function loadBlagues() {
+  if (!fs.existsSync(BLAGUES_FILE)) { saveBlagues(BLAGUES_DEFAULT); return [...BLAGUES_DEFAULT]; }
+  try { return JSON.parse(fs.readFileSync(BLAGUES_FILE, "utf8")); } catch { return [...BLAGUES_DEFAULT]; }
+}
+function saveBlagues(data) { fs.writeFileSync(BLAGUES_FILE, JSON.stringify(data, null, 2)); }
+
+// ============================================================
+//  CONFIG BOT
 // ============================================================
 
 const BOT_CONFIG_FILE = "./bot_config.json";
@@ -178,7 +198,12 @@ const DEFAULT_CONFIG = {
     channel: C.CHANNEL_TARNEC,
     theme: "L'Inde",
   },
-  giveaway_channel: null,
+  vittel: {
+    enabled: true,
+    interval_minutes: 5,
+    channel: C.CHANNEL_MATHS,
+    theme: "Mathématiques",
+  },
   statserveur_auto: false,
   statserveur_interval_minutes: 10,
   statserveur_channel: null,
@@ -188,7 +213,13 @@ function loadConfig() {
   if (!fs.existsSync(BOT_CONFIG_FILE)) { saveConfig(DEFAULT_CONFIG); return DEFAULT_CONFIG; }
   try {
     const saved = JSON.parse(fs.readFileSync(BOT_CONFIG_FILE, "utf8"));
-    return { ...DEFAULT_CONFIG, ...saved, descamps: { ...DEFAULT_CONFIG.descamps, ...saved.descamps }, tarnec: { ...DEFAULT_CONFIG.tarnec, ...saved.tarnec } };
+    return {
+      ...DEFAULT_CONFIG,
+      ...saved,
+      descamps: { ...DEFAULT_CONFIG.descamps, ...saved.descamps },
+      tarnec:   { ...DEFAULT_CONFIG.tarnec,   ...saved.tarnec   },
+      vittel:   { ...DEFAULT_CONFIG.vittel,   ...saved.vittel   },
+    };
   } catch { return DEFAULT_CONFIG; }
 }
 function saveConfig(data) { fs.writeFileSync(BOT_CONFIG_FILE, JSON.stringify(data, null, 2)); }
@@ -208,19 +239,16 @@ function saveGiveaways(data) { fs.writeFileSync(GIVEAWAY_FILE, JSON.stringify(da
 //  DODGE SYSTEM
 // ============================================================
 
-// Map<victimId, { commandName, expiresAt }>
 const dodgeWindows = new Map();
-
 function setDodgeWindow(userId, commandName, durationMs = 10_000) {
   dodgeWindows.set(userId, { commandName, expiresAt: Date.now() + durationMs });
 }
-function canDodge(userId, commandName) {
+function canDodge(userId) {
   const w = dodgeWindows.get(userId);
-  if (!w) return false;
-  if (Date.now() > w.expiresAt) { dodgeWindows.delete(userId); return false; }
-  if (w.commandName !== commandName) return false;
+  if (!w) return null;
+  if (Date.now() > w.expiresAt) { dodgeWindows.delete(userId); return null; }
   dodgeWindows.delete(userId);
-  return true;
+  return w;
 }
 
 // ============================================================
@@ -287,7 +315,6 @@ const SOUNDS = {
   naim:  `${C.SOUNDS_BASE}/naim.mp3`,
 };
 
-// Joue un son dans le vocal de l'utilisateur puis quitte
 async function playInVoice(member, soundUrl) {
   if (!voiceAvailable) return { ok: false, reason: "library_missing" };
   const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, entersState } = voiceLib;
@@ -306,7 +333,7 @@ async function playInVoice(member, soundUrl) {
 
     await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
 
-    const player  = createAudioPlayer();
+    const player   = createAudioPlayer();
     const resource = createAudioResource(soundUrl);
     player.play(resource);
     connection.subscribe(player);
@@ -320,15 +347,14 @@ async function playInVoice(member, soundUrl) {
   }
 }
 
-// Envoie le MP3 en pièce jointe dans le salon texte (fetch + buffer)
 async function sendMp3Attachment(interaction, soundKey, filename) {
   try {
     const url = SOUNDS[soundKey];
+    if (!url) return null;
     const res = await fetch(url);
     if (!res.ok) return null;
     const buffer = Buffer.from(await res.arrayBuffer());
-    const attachment = new AttachmentBuilder(buffer, { name: filename || `${soundKey}.mp3` });
-    return attachment;
+    return new AttachmentBuilder(buffer, { name: filename || `${soundKey}.mp3` });
   } catch { return null; }
 }
 
@@ -420,13 +446,13 @@ async function postBedrockMessage(ip, port) {
       color: C.GREEN, title: "📱 Connexion Bedrock — Soulakri", thumbnail: C.LOGO_URL,
       description: "Infos pour rejoindre depuis **Minecraft Bedrock** ✅",
       fields: [
-        { name: "📡 Adresse IP", value: `\`\`\`${ip}\`\`\``, inline: false },
+        { name: "📡 Adresse IP", value: `\`\`\`${ip}\`\`\``,   inline: false },
         { name: "🔌 Port",       value: `\`\`\`${port}\`\`\``, inline: false },
         { name: "⚠️ Info",       value: "Change à chaque redémarrage du serveur MC.", inline: false },
         { name: "📅 Mis à jour", value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true },
       ],
     });
-    const pins = await bedrockCh.messages.fetchPinned();
+    const pins  = await bedrockCh.messages.fetchPinned();
     const myPin = pins.find(m => m.author.id === client.user.id);
     if (myPin) { await myPin.edit({ embeds: [embed] }); }
     else { const msg = await bedrockCh.send({ embeds: [embed] }); await msg.pin().catch(() => {}); }
@@ -437,7 +463,7 @@ async function startBedrockWatcher() {
   const cached = loadBedrock();
   if (cached.port) await postBedrockMessage(cached.ip || C.MC_IP, cached.port);
   await checkBedrockPort();
-  setInterval(checkBedrockPort, 15 * 60 * 1000);
+  setInterval(checkBedrockPort, 30 * 60 * 1000);
 }
 
 // ============================================================
@@ -451,23 +477,32 @@ function loadObjectif() {
 }
 function saveObjectif(data) { fs.writeFileSync(OBJECTIF_FILE, JSON.stringify(data, null, 2)); }
 
-// ============================================================
-//  BLAGUES
-// ============================================================
-
-const BLAGUES = [
-  { joke: "Pourquoi Creeper est toujours seul ?",               answer: "Parce qu'il fait exploser toutes ses relations ! 💥" },
-  { joke: "Comment s'appelle un joueur Minecraft qui pleure ?", answer: "Un mineur en larmes ! ⛏️" },
-  { joke: "Quel est le sport préféré des Endermen ?",           answer: "La téléportation marathon ! 🏃" },
-  { joke: "Pourquoi Steve ne sourit jamais ?",                  answer: "Parce qu'il a perdu ses diamonds dans la lave ! 💎" },
-  { joke: "Pourquoi les Zombies n'aiment pas le soleil ?",      answer: "Parce qu'il leur tape sur les nerfs… et sur la peau ! ☀️" },
-];
+async function updateObjectifChannel(guild, obj) {
+  try {
+    const ch = guild.channels.cache.get(C.CHANNEL_OBJECTIF);
+    if (!ch) return;
+    const embed = makeEmbed({
+      color:       C.GOLD,
+      title:       "🎯 Objectif actuel — Soulakri",
+      description: `> ${obj.texte}`,
+      thumbnail:   C.LOGO_URL,
+      fields:      obj.updatedBy
+        ? [{ name: "✏️ Mis à jour par", value: `<@${obj.updatedBy}>`, inline: true }, { name: "📅 Le", value: `<t:${Math.floor(obj.updatedAt / 1000)}:D>`, inline: true }]
+        : [],
+    });
+    const pins  = await ch.messages.fetchPinned().catch(() => null);
+    const myPin = pins?.find(m => m.author.id === client.user.id);
+    if (myPin) { await myPin.edit({ embeds: [embed] }); }
+    else { const msg = await ch.send({ embeds: [embed] }); await msg.pin().catch(() => {}); }
+  } catch (err) { console.error("[Objectif] updateObjectifChannel :", err); }
+}
 
 // ============================================================
 //  VITTEL BOT
 // ============================================================
 
 let vittelActive = null;
+let vittelTimer  = null;
 
 function generateMathQuestion() {
   const types = [
@@ -506,9 +541,16 @@ function generateMathQuestion() {
 async function runVittelQuestion(channel) {
   if (vittelActive) return;
   const q = generateMathQuestion();
-  await channel.send({ embeds: [makeEmbed({ color: 0x00BFFF, author: { name: "Vittel BOT", iconURL: C.LOGO_URL }, title: "🧮 Question mathématique !", description: `**${q.question}**\n\n⏱️ Vous avez **60 secondes** pour répondre !` }).setFooter({ text: "Tapez votre réponse directement dans ce salon" })] });
+  await channel.send({ embeds: [makeEmbed({
+    color: 0x00BFFF,
+    author: { name: "Vittel BOT", iconURL: C.LOGO_URL },
+    title: "🧮 Question mathématique !",
+    description: `**${q.question}**\n\n⏱️ Vous avez **60 secondes** pour répondre !`,
+  }).setFooter({ text: "Tapez votre réponse directement dans ce salon" })] });
+
   const collector = channel.createMessageCollector({ filter: m => !m.author.bot, time: C.VITTEL_TIMEOUT_MS });
   vittelActive = { q, collector };
+
   collector.on("collect", async (m) => {
     const resp = m.content.trim().toLowerCase().replace(/\s/g, "");
     let correct = false;
@@ -525,20 +567,31 @@ async function runVittelQuestion(channel) {
       await channel.send({ embeds: [makeEmbed({ color: C.RED, author: { name: "Vittel BOT", iconURL: C.LOGO_URL }, title: "❌ Faux !", description: `${m.author}, **${m.content}** est incorrect. Réessaie ! 💪` })] });
     }
   });
+
   collector.on("end", async (_, reason) => {
     vittelActive = null;
-    if (reason !== "answered") await channel.send({ embeds: [makeEmbed({ color: C.ORANGE, author: { name: "Vittel BOT", iconURL: C.LOGO_URL }, title: "⏰ Temps écoulé !", description: `Réponse : **${q.checkFn ? "voir énoncé" : q.answer}**${q.hint ? `\n💡 ${q.hint}` : ""}` })] }).catch(() => {});
+    if (reason !== "answered") {
+      await channel.send({ embeds: [makeEmbed({ color: C.ORANGE, author: { name: "Vittel BOT", iconURL: C.LOGO_URL }, title: "⏰ Temps écoulé !", description: `Réponse : **${q.checkFn ? "voir énoncé" : q.answer}**${q.hint ? `\n💡 ${q.hint}` : ""}` })] }).catch(() => {});
+    }
   });
 }
 
 function startVittelBot() {
-  setInterval(async () => {
+  if (vittelTimer) clearInterval(vittelTimer);
+  const cfg = loadConfig();
+  if (!cfg.vittel.enabled) return;
+
+  vittelTimer = setInterval(async () => {
     try {
-      const guild = client.guilds.cache.get(C.GUILD_ID);
-      const channel = guild?.channels.cache.get(C.CHANNEL_MATHS);
+      const cfgNow  = loadConfig();
+      if (!cfgNow.vittel.enabled) return;
+      const guild   = client.guilds.cache.get(C.GUILD_ID);
+      const channel = guild?.channels.cache.get(cfgNow.vittel.channel || C.CHANNEL_MATHS);
       if (channel) await runVittelQuestion(channel);
     } catch (err) { console.error("Vittel BOT erreur :", err); }
-  }, C.VITTEL_INTERVAL_MS);
+  }, (cfg.vittel.interval_minutes || 5) * 60 * 1000);
+
+  console.log(`[Vittel BOT] Démarré — toutes les ${cfg.vittel.interval_minutes} min`);
 }
 
 // ============================================================
@@ -566,7 +619,7 @@ function startDescampsBot() {
 
   descampsTimer = setInterval(async () => {
     try {
-      const cfgNow = loadConfig();
+      const cfgNow  = loadConfig();
       if (!cfgNow.descamps.enabled) return;
       const guild   = client.guilds.cache.get(C.GUILD_ID);
       const channel = guild?.channels.cache.get(cfgNow.descamps.channel || C.CHANNEL_DESCAMPS);
@@ -574,7 +627,7 @@ function startDescampsBot() {
       const anecdote = DESCAMPS_ANECDOTES[descampsAnecdoteIndex % DESCAMPS_ANECDOTES.length];
       descampsAnecdoteIndex++;
       await channel.send({ embeds: [makeEmbed({
-        color: 0xE67E22,
+        color:       0xE67E22,
         author:      { name: "Descamps BOT 📚", iconURL: C.LOGO_URL },
         title:       `📖 ${anecdote.title}`,
         description: anecdote.content,
@@ -609,7 +662,7 @@ const TARNEC_FACTS = {
 };
 
 let tarnecFactIndex = 0;
-let tarnecTimer = null;
+let tarnecTimer    = null;
 
 function startTarnecBot() {
   const cfg = loadConfig();
@@ -618,7 +671,7 @@ function startTarnecBot() {
 
   tarnecTimer = setInterval(async () => {
     try {
-      const cfgNow = loadConfig();
+      const cfgNow  = loadConfig();
       if (!cfgNow.tarnec.enabled) return;
       const guild   = client.guilds.cache.get(C.GUILD_ID);
       const channel = guild?.channels.cache.get(cfgNow.tarnec.channel || C.CHANNEL_TARNEC);
@@ -663,8 +716,7 @@ function startStatServeurAuto() {
         ? makeEmbed({ color: C.CYAN, title: "🌐 Statut du serveur Soulakri", thumbnail: C.LOGO_URL, description: "Le serveur est **en ligne** ✅", fields: [{ name: "👤 Joueurs", value: `${data.players?.online ?? 0} / ${data.players?.max ?? 0}`, inline: true }, { name: "📦 Version", value: `\`${data.version ?? "?"}\``, inline: true }, { name: "🏓 MOTD", value: data.motd?.clean?.[0] ?? "Soulakri MC", inline: false }, { name: "🎮 IP", value: `\`${C.MC_IP}:${C.MC_PORT}\``, inline: true }, { name: "🔄 Mis à jour", value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true }] })
         : makeEmbed({ color: C.RED, title: "❌ Serveur hors ligne", description: "Le serveur est actuellement **hors ligne**.", fields: [{ name: "🔄 Vérifié", value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true }] });
 
-      // Edit le message épinglé ou en envoyer un nouveau
-      const pins = await ch.messages.fetchPinned().catch(() => null);
+      const pins  = await ch.messages.fetchPinned().catch(() => null);
       const myPin = pins?.find(m => m.author.id === client.user.id);
       if (myPin) { await myPin.edit({ embeds: [embed] }); }
       else { const msg = await ch.send({ embeds: [embed] }); await msg.pin().catch(() => {}); }
@@ -690,7 +742,6 @@ async function endGiveaway(giveawayId) {
     const message = await channel.messages.fetch(gw.messageId).catch(() => null);
     if (!message) return;
 
-    // Récupère les réactions 🎉
     const reaction = message.reactions.cache.get("🎉");
     await reaction?.users.fetch();
     const participants = reaction?.users.cache.filter(u => !u.bot).map(u => u.id) || [];
@@ -727,7 +778,7 @@ async function endGiveaway(giveawayId) {
 function scheduleGiveaway(giveawayId, endsAt) {
   const delay = endsAt - Date.now();
   if (delay <= 0) { endGiveaway(giveawayId); return; }
-  if (delay > 2_147_483_647) return; // setTimeout max ~24 days
+  if (delay > 2_147_483_647) return;
   setTimeout(() => endGiveaway(giveawayId), delay);
 }
 
@@ -743,26 +794,23 @@ function restoreGiveaways() {
 // ============================================================
 
 const COMMANDS = [
-  // ── Minecraft ──
-  new SlashCommandBuilder().setName("help").setDescription("Affiche toutes les commandes"),
-  new SlashCommandBuilder().setName("ip").setDescription("IP du serveur Minecraft"),
+  new SlashCommandBuilder().setName("help").setDescription("📖 Affiche toutes les commandes"),
+  new SlashCommandBuilder().setName("ip").setDescription("🎮 IP du serveur Minecraft"),
   new SlashCommandBuilder().setName("bedrock").setDescription("📱 Infos connexion Bedrock"),
-  new SlashCommandBuilder().setName("serverinfo").setDescription("Infos du serveur Discord"),
+  new SlashCommandBuilder().setName("serverinfo").setDescription("🌐 Infos du serveur Discord"),
   new SlashCommandBuilder().setName("statserveur").setDescription("🌐 Statut du serveur Minecraft"),
   new SlashCommandBuilder().setName("joueurs").setDescription("👥 Joueurs connectés sur le MC"),
   new SlashCommandBuilder()
-    .setName("stats").setDescription("Stats d'un joueur Minecraft")
+    .setName("stats").setDescription("📊 Stats d'un joueur Minecraft")
     .addStringOption(o => o.setName("pseudo").setDescription("Pseudo Minecraft").setRequired(true)),
 
-  // ── Profil / XP ──
-  new SlashCommandBuilder().setName("grade").setDescription("Ton grade et niveau XP"),
+  new SlashCommandBuilder().setName("grade").setDescription("🏅 Ton grade et niveau XP"),
   new SlashCommandBuilder()
-    .setName("niveau").setDescription("Niveau XP d'un joueur")
+    .setName("niveau").setDescription("⭐ Niveau XP d'un joueur")
     .addUserOption(o => o.setName("joueur").setDescription("Joueur").setRequired(false)),
-  new SlashCommandBuilder().setName("top").setDescription("Classement XP"),
+  new SlashCommandBuilder().setName("top").setDescription("🏆 Classement XP"),
 
-  // ── Fun ──
-  new SlashCommandBuilder().setName("blague").setDescription("Blague Minecraft aléatoire 😂"),
+  new SlashCommandBuilder().setName("blague").setDescription("😂 Blague aléatoire"),
   new SlashCommandBuilder().setName("soules").setDescription("🔥 Soules lance une flash !"),
   new SlashCommandBuilder().setName("giry").setDescription("💥 Giry envoie la flash de Skye !"),
   new SlashCommandBuilder().setName("67").setDescription("🎲 Six Seven !"),
@@ -779,12 +827,11 @@ const COMMANDS = [
   new SlashCommandBuilder().setName("obled").setDescription("🐍 M. Obled — Python & Thonny"),
   new SlashCommandBuilder().setName("bourgin").setDescription("🧱 WALL JUMP !"),
   new SlashCommandBuilder().setName("bobard").setDescription("🤥 Bobard ou vérité ?"),
-  new SlashCommandBuilder().setName("dodge").setDescription("🌀 Esquiver la prochaine flash (fenêtre 10s)"),
+  new SlashCommandBuilder().setName("dodge").setDescription("🌀 Esquiver la prochaine flash"),
 
-  // ── Utilitaires ──
   new SlashCommandBuilder().setName("objectif").setDescription("🎯 Objectif actuel du serveur"),
   new SlashCommandBuilder()
-    .setName("sondage").setDescription("📊 Créer un sondage rapide")
+    .setName("sondage").setDescription("📊 Créer un sondage")
     .addStringOption(o => o.setName("question").setDescription("Ta question").setRequired(true))
     .addStringOption(o => o.setName("choix1").setDescription("Choix 1").setRequired(false))
     .addStringOption(o => o.setName("choix2").setDescription("Choix 2").setRequired(false))
@@ -794,32 +841,29 @@ const COMMANDS = [
     .setName("rappel").setDescription("⏰ Se rappeler quelque chose")
     .addIntegerOption(o => o.setName("minutes").setDescription("Dans combien de minutes").setRequired(true))
     .addStringOption(o => o.setName("message").setDescription("De quoi te rappeler").setRequired(true)),
-  new SlashCommandBuilder().setName("ticket").setDescription("Ouvre un ticket support"),
-
-  // ── Anniversaires ──
+  new SlashCommandBuilder().setName("ticket").setDescription("🎫 Ouvre un ticket support"),
   new SlashCommandBuilder()
     .setName("anniversaire").setDescription("🎂 Enregistre ton anniversaire")
     .addStringOption(o => o.setName("date").setDescription("Ta date (JJ/MM)").setRequired(true)),
 
-  // ── Modération ──
   new SlashCommandBuilder()
-    .setName("ban").setDescription("Bannir un membre (Mod)")
+    .setName("ban").setDescription("🔨 Bannir un membre (Mod)")
     .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
     .addUserOption(o => o.setName("membre").setDescription("Membre").setRequired(true))
     .addStringOption(o => o.setName("raison").setDescription("Raison").setRequired(false)),
   new SlashCommandBuilder()
-    .setName("kick").setDescription("Expulser un membre (Mod)")
+    .setName("kick").setDescription("👢 Expulser un membre (Mod)")
     .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
     .addUserOption(o => o.setName("membre").setDescription("Membre").setRequired(true))
     .addStringOption(o => o.setName("raison").setDescription("Raison").setRequired(false)),
   new SlashCommandBuilder()
-    .setName("mute").setDescription("Mute temporaire (Mod)")
+    .setName("mute").setDescription("🔇 Mute temporaire (Mod)")
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
     .addUserOption(o => o.setName("membre").setDescription("Membre").setRequired(true))
     .addIntegerOption(o => o.setName("minutes").setDescription("Durée en minutes").setRequired(true))
     .addStringOption(o => o.setName("raison").setDescription("Raison").setRequired(false)),
   new SlashCommandBuilder()
-    .setName("unmute").setDescription("Retirer le mute (Mod)")
+    .setName("unmute").setDescription("🔊 Retirer le mute (Mod)")
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
     .addUserOption(o => o.setName("membre").setDescription("Membre").setRequired(true)),
   new SlashCommandBuilder()
@@ -835,9 +879,8 @@ const COMMANDS = [
     .setName("clearwarn").setDescription("🧹 Supprimer les warns d'un membre (Admin)")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addUserOption(o => o.setName("membre").setDescription("Membre").setRequired(true))
-    .addStringOption(o => o.setName("warn_id").setDescription("ID d'un warn précis (optionnel, sinon tous)").setRequired(false)),
+    .addStringOption(o => o.setName("warn_id").setDescription("ID d'un warn précis (optionnel)").setRequired(false)),
 
-  // ── Giveaway ──
   new SlashCommandBuilder()
     .setName("giveaway").setDescription("🎉 Lancer un giveaway")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
@@ -845,53 +888,32 @@ const COMMANDS = [
     .addIntegerOption(o => o.setName("duree").setDescription("Durée en minutes").setRequired(true))
     .addIntegerOption(o => o.setName("gagnants").setDescription("Nombre de gagnants (défaut: 1)").setRequired(false)),
 
-  // ── Admin ──
-  new SlashCommandBuilder()
-    .setName("mc-objectif").setDescription("🎯 Définir l'objectif du serveur (Admin)")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addStringOption(o => o.setName("texte").setDescription("Nouvel objectif").setRequired(true)),
   new SlashCommandBuilder()
     .setName("set-cookie").setDescription("🍪 Mettre à jour le cookie FalixNodes (Admin)")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addStringOption(o => o.setName("cookie").setDescription("Cookie complet").setRequired(true)),
   new SlashCommandBuilder()
-    .setName("reglement").setDescription("Poster le règlement (Admin)")
+    .setName("reglement").setDescription("📜 Poster le règlement (Admin)")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   new SlashCommandBuilder()
-    .setName("roles").setDescription("Poster le sélecteur de rôles (Admin)")
+    .setName("roles").setDescription("🎭 Poster le sélecteur de rôles (Admin)")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   new SlashCommandBuilder()
-    .setName("vittel").setDescription("Lancer Vittel BOT (Admin)")
+    .setName("vittel").setDescription("🧮 Lancer Vittel BOT (Admin)")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   new SlashCommandBuilder()
     .setName("tarnec-theme").setDescription("🗺️ Changer le thème de LeTarnec BOT (Admin)")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addStringOption(o => o.setName("theme").setDescription("Nouveau thème géo/histoire").setRequired(true)),
-
-  // ── Config ──
+    .addStringOption(o => o.setName("theme").setDescription("Nouveau thème").setRequired(true)),
   new SlashCommandBuilder()
-    .setName("config").setDescription("⚙️ Panneau de configuration du bot (Admin)")
+    .setName("mc-objectif").setDescription("🎯 Définir l'objectif du serveur (Admin)")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addSubcommand(sub =>
-      sub.setName("afficher").setDescription("Voir la configuration actuelle"))
-    .addSubcommand(sub =>
-      sub.setName("descamps")
-        .setDescription("Configurer Descamps BOT")
-        .addBooleanOption(o => o.setName("actif").setDescription("Activer/désactiver").setRequired(false))
-        .addIntegerOption(o => o.setName("intervalle").setDescription("Intervalle en minutes").setRequired(false))
-        .addChannelOption(o => o.setName("salon").setDescription("Salon cible").setRequired(false)))
-    .addSubcommand(sub =>
-      sub.setName("tarnec")
-        .setDescription("Configurer LeTarnec BOT")
-        .addBooleanOption(o => o.setName("actif").setDescription("Activer/désactiver").setRequired(false))
-        .addIntegerOption(o => o.setName("intervalle").setDescription("Intervalle en minutes").setRequired(false))
-        .addChannelOption(o => o.setName("salon").setDescription("Salon cible").setRequired(false)))
-    .addSubcommand(sub =>
-      sub.setName("statserveur")
-        .setDescription("Configurer le statut auto du serveur MC")
-        .addBooleanOption(o => o.setName("actif").setDescription("Activer/désactiver").setRequired(false))
-        .addIntegerOption(o => o.setName("intervalle").setDescription("Intervalle en minutes (min 5)").setRequired(false))
-        .addChannelOption(o => o.setName("salon").setDescription("Salon où afficher le statut").setRequired(false))),
+    .addStringOption(o => o.setName("texte").setDescription("Nouvel objectif").setRequired(true)),
+
+  // CONFIG — unique point d'entrée avec menu de navigation
+  new SlashCommandBuilder()
+    .setName("config").setDescription("⚙️ Panneau de configuration global (Admin)")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 ];
 
 // ============================================================
@@ -908,11 +930,230 @@ async function registerCommands() {
 }
 
 // ============================================================
+//  CONFIG UI — builders
+// ============================================================
+
+function buildConfigMainEmbed(cfg) {
+  const statusEmoji = v => v ? "🟢" : "🔴";
+  return makeEmbed({
+    color:       0x2B2D31,
+    author:      { name: "Soulakri BOT v13 — Configuration", iconURL: C.LOGO_URL },
+    title:       "⚙️ Panneau de configuration",
+    description: "Sélectionne une catégorie dans le menu ci-dessous pour modifier la configuration.",
+    thumbnail:   C.LOGO_URL,
+    fields: [
+      {
+        name:  "🧮 Vittel BOT",
+        value: `${statusEmoji(cfg.vittel.enabled)} **${cfg.vittel.enabled ? "Actif" : "Inactif"}** · ⏱️ ${cfg.vittel.interval_minutes} min · <#${cfg.vittel.channel || C.CHANNEL_MATHS}>`,
+        inline: false,
+      },
+      {
+        name:  "📚 Descamps BOT",
+        value: `${statusEmoji(cfg.descamps.enabled)} **${cfg.descamps.enabled ? "Actif" : "Inactif"}** · ⏱️ ${cfg.descamps.interval_minutes} min · <#${cfg.descamps.channel || C.CHANNEL_DESCAMPS}>`,
+        inline: false,
+      },
+      {
+        name:  "🗺️ LeTarnec BOT",
+        value: `${statusEmoji(cfg.tarnec.enabled)} **${cfg.tarnec.enabled ? "Actif" : "Inactif"}** · ⏱️ ${cfg.tarnec.interval_minutes} min · <#${cfg.tarnec.channel || C.CHANNEL_TARNEC}>\n🎯 Thème : **${cfg.tarnec.theme}**`,
+        inline: false,
+      },
+      {
+        name:  "🌐 StatServeur Auto",
+        value: `${statusEmoji(cfg.statserveur_auto)} **${cfg.statserveur_auto ? "Actif" : "Inactif"}** · ⏱️ ${cfg.statserveur_interval_minutes} min · ${cfg.statserveur_channel ? `<#${cfg.statserveur_channel}>` : "*salon non défini*"}`,
+        inline: false,
+      },
+      {
+        name:  "🔊 Audio (@discordjs/voice)",
+        value: voiceAvailable ? "🟢 Installé — commandes vocales actives" : "🔴 Non installé — commandes vocales désactivées",
+        inline: false,
+      },
+    ],
+  });
+}
+
+function buildConfigMainRow() {
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId("config_category")
+    .setPlaceholder("📂 Choisir une catégorie...")
+    .addOptions(
+      new StringSelectMenuOptionBuilder().setLabel("🧮 Vittel BOT").setDescription("Questions maths auto").setValue("vittel").setEmoji("🧮"),
+      new StringSelectMenuOptionBuilder().setLabel("📚 Descamps BOT").setDescription("Anecdotes SES auto").setValue("descamps").setEmoji("📚"),
+      new StringSelectMenuOptionBuilder().setLabel("🗺️ LeTarnec BOT").setDescription("Fun facts Histogéo auto").setValue("tarnec").setEmoji("🗺️"),
+      new StringSelectMenuOptionBuilder().setLabel("🌐 StatServeur Auto").setDescription("Statut MC épinglé").setValue("statserveur").setEmoji("🌐"),
+      new StringSelectMenuOptionBuilder().setLabel("🍪 FalixNodes").setDescription("Cookie + port Bedrock").setValue("falix").setEmoji("🍪"),
+      new StringSelectMenuOptionBuilder().setLabel("😂 Blagues").setDescription("Gérer les blagues perso").setValue("blagues").setEmoji("😂"),
+    );
+  return new ActionRowBuilder().addComponents(menu);
+}
+
+// Embed + boutons pour une sous-catégorie
+function buildCategoryEmbed(cat, cfg) {
+  if (cat === "vittel") {
+    return {
+      embed: makeEmbed({
+        color:       0x00BFFF,
+        author:      { name: "Configuration — Vittel BOT", iconURL: C.LOGO_URL },
+        title:       "🧮 Vittel BOT",
+        description: "Bot automatique de questions mathématiques.",
+        fields: [
+          { name: "État",       value: cfg.vittel.enabled ? "🟢 Actif" : "🔴 Inactif", inline: true },
+          { name: "Intervalle", value: `${cfg.vittel.interval_minutes} minutes`,         inline: true },
+          { name: "Salon",      value: `<#${cfg.vittel.channel || C.CHANNEL_MATHS}>`,   inline: true },
+          { name: "Thème",      value: cfg.vittel.theme || "Mathématiques",             inline: true },
+        ],
+      }),
+      rows: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("cfg_vittel_toggle").setLabel(cfg.vittel.enabled ? "🔴 Désactiver" : "🟢 Activer").setStyle(cfg.vittel.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+          new ButtonBuilder().setCustomId("cfg_vittel_interval").setLabel("⏱️ Intervalle").setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId("cfg_vittel_theme").setLabel("🎯 Thème").setStyle(ButtonStyle.Secondary),
+        ),
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("cfg_back").setLabel("◀ Retour").setStyle(ButtonStyle.Secondary),
+        ),
+      ],
+    };
+  }
+
+  if (cat === "descamps") {
+    return {
+      embed: makeEmbed({
+        color:       0xE67E22,
+        author:      { name: "Configuration — Descamps BOT", iconURL: C.LOGO_URL },
+        title:       "📚 Descamps BOT",
+        description: "Bot automatique d'anecdotes SES.",
+        fields: [
+          { name: "État",       value: cfg.descamps.enabled ? "🟢 Actif" : "🔴 Inactif",         inline: true },
+          { name: "Intervalle", value: `${cfg.descamps.interval_minutes} minutes`,                 inline: true },
+          { name: "Salon",      value: `<#${cfg.descamps.channel || C.CHANNEL_DESCAMPS}>`,         inline: true },
+        ],
+      }),
+      rows: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("cfg_descamps_toggle").setLabel(cfg.descamps.enabled ? "🔴 Désactiver" : "🟢 Activer").setStyle(cfg.descamps.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+          new ButtonBuilder().setCustomId("cfg_descamps_interval").setLabel("⏱️ Intervalle").setStyle(ButtonStyle.Primary),
+        ),
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("cfg_back").setLabel("◀ Retour").setStyle(ButtonStyle.Secondary),
+        ),
+      ],
+    };
+  }
+
+  if (cat === "tarnec") {
+    return {
+      embed: makeEmbed({
+        color:       0x8E44AD,
+        author:      { name: "Configuration — LeTarnec BOT", iconURL: C.LOGO_URL },
+        title:       "🗺️ LeTarnec BOT",
+        description: "Bot automatique de fun facts Histoire-Géographie.",
+        fields: [
+          { name: "État",       value: cfg.tarnec.enabled ? "🟢 Actif" : "🔴 Inactif",       inline: true },
+          { name: "Intervalle", value: `${cfg.tarnec.interval_minutes} minutes`,               inline: true },
+          { name: "Salon",      value: `<#${cfg.tarnec.channel || C.CHANNEL_TARNEC}>`,         inline: true },
+          { name: "Thème actuel", value: `**${cfg.tarnec.theme}**`,                            inline: true },
+          { name: "Thèmes dispo", value: Object.keys(TARNEC_FACTS).filter(k => k !== "default").map(k => `\`${k}\``).join(", "), inline: false },
+        ],
+      }),
+      rows: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("cfg_tarnec_toggle").setLabel(cfg.tarnec.enabled ? "🔴 Désactiver" : "🟢 Activer").setStyle(cfg.tarnec.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+          new ButtonBuilder().setCustomId("cfg_tarnec_interval").setLabel("⏱️ Intervalle").setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId("cfg_tarnec_theme").setLabel("🎯 Thème").setStyle(ButtonStyle.Secondary),
+        ),
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("cfg_back").setLabel("◀ Retour").setStyle(ButtonStyle.Secondary),
+        ),
+      ],
+    };
+  }
+
+  if (cat === "statserveur") {
+    return {
+      embed: makeEmbed({
+        color:       C.CYAN,
+        author:      { name: "Configuration — StatServeur Auto", iconURL: C.LOGO_URL },
+        title:       "🌐 StatServeur Auto",
+        description: "Affiche et épingle automatiquement le statut du serveur MC dans un salon.",
+        fields: [
+          { name: "État",       value: cfg.statserveur_auto ? "🟢 Actif" : "🔴 Inactif",                                              inline: true },
+          { name: "Intervalle", value: `${cfg.statserveur_interval_minutes} minutes`,                                                   inline: true },
+          { name: "Salon",      value: cfg.statserveur_channel ? `<#${cfg.statserveur_channel}>` : "*non défini*",                     inline: true },
+        ],
+      }),
+      rows: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("cfg_stat_toggle").setLabel(cfg.statserveur_auto ? "🔴 Désactiver" : "🟢 Activer").setStyle(cfg.statserveur_auto ? ButtonStyle.Danger : ButtonStyle.Success),
+          new ButtonBuilder().setCustomId("cfg_stat_interval").setLabel("⏱️ Intervalle").setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId("cfg_stat_salon").setLabel("📡 Définir salon (ID)").setStyle(ButtonStyle.Secondary),
+        ),
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("cfg_back").setLabel("◀ Retour").setStyle(ButtonStyle.Secondary),
+        ),
+      ],
+    };
+  }
+
+  if (cat === "falix") {
+    const cached = loadBedrock();
+    return {
+      embed: makeEmbed({
+        color:       C.ORANGE,
+        author:      { name: "Configuration — FalixNodes", iconURL: C.LOGO_URL },
+        title:       "🍪 FalixNodes — Bedrock",
+        description: "Gestion du cookie de session FalixNodes pour le watcher Bedrock.",
+        fields: [
+          { name: "🌐 Serveur ID",  value: `\`${C.FALIX_SERVER}\``,                                                           inline: true },
+          { name: "🔌 Port cache",  value: cached.port ? `\`${cached.port}\`` : "*inconnu*",                                  inline: true },
+          { name: "📅 Dernière MAJ",value: cached.updatedAt ? `<t:${Math.floor(cached.updatedAt / 1000)}:R>` : "*jamais*",    inline: true },
+          { name: "🍪 Cookie",      value: process.env.FALIX_SESSION ? "`✅ Défini`" : "`❌ Manquant`",                        inline: true },
+        ],
+      }),
+      rows: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("cfg_falix_cookie").setLabel("🍪 Nouveau cookie").setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId("cfg_falix_check").setLabel("🔄 Vérifier port maintenant").setStyle(ButtonStyle.Secondary),
+        ),
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("cfg_back").setLabel("◀ Retour").setStyle(ButtonStyle.Secondary),
+        ),
+      ],
+    };
+  }
+
+  if (cat === "blagues") {
+    const blagues = loadBlagues();
+    return {
+      embed: makeEmbed({
+        color:       C.ORANGE,
+        author:      { name: "Configuration — Blagues", iconURL: C.LOGO_URL },
+        title:       "😂 Gestion des blagues",
+        description: `**${blagues.length} blague(s)** dans la base.\n\nAjoute, consulte ou supprime des blagues utilisées par \`/blague\`.`,
+        fields:      blagues.slice(0, 5).map((b, i) => ({ name: `${i + 1}. ${b.joke}`, value: `> ${b.answer}`, inline: false }))
+          .concat(blagues.length > 5 ? [{ name: "...", value: `*${blagues.length - 5} blague(s) supplémentaire(s) non affichée(s)*`, inline: false }] : []),
+      }),
+      rows: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("cfg_blague_add").setLabel("➕ Ajouter une blague").setStyle(ButtonStyle.Success),
+          new ButtonBuilder().setCustomId("cfg_blague_del").setLabel("🗑️ Supprimer (n°)").setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId("cfg_blague_reset").setLabel("🔄 Réinitialiser").setStyle(ButtonStyle.Secondary),
+        ),
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("cfg_back").setLabel("◀ Retour").setStyle(ButtonStyle.Secondary),
+        ),
+      ],
+    };
+  }
+
+  return { embed: makeEmbed({ color: C.RED, title: "❌ Catégorie inconnue" }), rows: [] };
+}
+
+// ============================================================
 //  BOT PRÊT
 // ============================================================
 
 client.once("ready", async () => {
-  console.log(`✅ ${client.user.tag} connecté — Soulakri BOT v12`);
+  console.log(`✅ ${client.user.tag} connecté — Soulakri BOT v13`);
   client.user.setActivity("Soulakri 🎮 | /help", { type: 0 });
   await registerCommands();
   startVittelBot();
@@ -977,7 +1218,7 @@ client.on("guildMemberRemove", (member) => {
 });
 
 // ============================================================
-//  ANNIVERSAIRES — checker quotidien
+//  ANNIVERSAIRES — checker
 // ============================================================
 
 function startBirthdayChecker() {
@@ -1000,8 +1241,6 @@ function startBirthdayChecker() {
       }
     } catch (err) { console.error("[Birthday] Erreur :", err); }
   };
-
-  // Check toutes les heures
   setInterval(check, 60 * 60 * 1000);
   check();
 }
@@ -1011,6 +1250,85 @@ function startBirthdayChecker() {
 // ============================================================
 
 client.on("interactionCreate", async (interaction) => {
+
+  // ── MODALES ──
+  if (interaction.isModalSubmit()) {
+    // Blague add
+    if (interaction.customId === "modal_blague_add") {
+      const joke   = interaction.fields.getTextInputValue("blague_joke").trim();
+      const answer = interaction.fields.getTextInputValue("blague_answer").trim();
+      if (!joke) return interaction.reply({ content: "❌ La question ne peut pas être vide.", ephemeral: true });
+      const blagues = loadBlagues();
+      blagues.push({ joke, answer: answer || "*(pas de réponse)*" });
+      saveBlagues(blagues);
+      const cfg = loadConfig();
+      const { embed, rows } = buildCategoryEmbed("blagues", cfg);
+      return interaction.update({ embeds: [embed], components: rows });
+    }
+
+    // Blague supprimer
+    if (interaction.customId === "modal_blague_del") {
+      const n = parseInt(interaction.fields.getTextInputValue("blague_num").trim());
+      const blagues = loadBlagues();
+      if (isNaN(n) || n < 1 || n > blagues.length) return interaction.reply({ content: `❌ Numéro invalide (1–${blagues.length}).`, ephemeral: true });
+      blagues.splice(n - 1, 1);
+      saveBlagues(blagues);
+      const cfg = loadConfig();
+      const { embed, rows } = buildCategoryEmbed("blagues", cfg);
+      return interaction.update({ embeds: [embed], components: rows });
+    }
+
+    // FalixNodes cookie
+    if (interaction.customId === "modal_falix_cookie") {
+      const cookie = interaction.fields.getTextInputValue("falix_cookie_value").trim();
+      process.env.FALIX_SESSION = cookie;
+      fs.writeFileSync("./falix_session.txt", cookie);
+      checkBedrockPort().catch(console.error);
+      const cfg = loadConfig();
+      const { embed, rows } = buildCategoryEmbed("falix", cfg);
+      return interaction.update({ embeds: [embed], components: rows });
+    }
+
+    // Intervalle generique
+    if (interaction.customId.startsWith("modal_interval_")) {
+      const bot = interaction.customId.replace("modal_interval_", "");
+      const val = parseInt(interaction.fields.getTextInputValue("interval_value").trim());
+      if (isNaN(val) || val < 1) return interaction.reply({ content: "❌ Valeur invalide (minimum 1).", ephemeral: true });
+      const cfg = loadConfig();
+      if (bot === "vittel")    { cfg.vittel.interval_minutes     = val; saveConfig(cfg); startVittelBot(); }
+      if (bot === "descamps")  { cfg.descamps.interval_minutes   = val; saveConfig(cfg); startDescampsBot(); }
+      if (bot === "tarnec")    { cfg.tarnec.interval_minutes     = val; saveConfig(cfg); startTarnecBot(); }
+      if (bot === "statserveur") { cfg.statserveur_interval_minutes = Math.max(5, val); saveConfig(cfg); startStatServeurAuto(); }
+      const { embed, rows } = buildCategoryEmbed(bot === "statserveur" ? "statserveur" : bot, loadConfig());
+      return interaction.update({ embeds: [embed], components: rows });
+    }
+
+    // Thème (vittel ou tarnec)
+    if (interaction.customId.startsWith("modal_theme_")) {
+      const bot   = interaction.customId.replace("modal_theme_", "");
+      const theme = interaction.fields.getTextInputValue("theme_value").trim();
+      const cfg   = loadConfig();
+      if (bot === "vittel")  { cfg.vittel.theme  = theme; saveConfig(cfg); }
+      if (bot === "tarnec")  { cfg.tarnec.theme  = theme; tarnecFactIndex = 0; saveConfig(cfg); startTarnecBot(); }
+      const { embed, rows } = buildCategoryEmbed(bot, loadConfig());
+      return interaction.update({ embeds: [embed], components: rows });
+    }
+
+    // Salon statserveur
+    if (interaction.customId === "modal_stat_salon") {
+      const id  = interaction.fields.getTextInputValue("stat_salon_id").trim().replace(/[<#>]/g, "");
+      const ch  = interaction.guild.channels.cache.get(id);
+      if (!ch)  return interaction.reply({ content: "❌ Salon introuvable avec cet ID.", ephemeral: true });
+      const cfg = loadConfig();
+      cfg.statserveur_channel = id;
+      saveConfig(cfg);
+      startStatServeurAuto();
+      const { embed, rows } = buildCategoryEmbed("statserveur", loadConfig());
+      return interaction.update({ embeds: [embed], components: rows });
+    }
+
+    return;
+  }
 
   // ── SELECT MENU — rôles ──
   if (interaction.isStringSelectMenu() && interaction.customId === "role_selector") {
@@ -1033,9 +1351,134 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
+  // ── SELECT MENU — config catégorie ──
+  if (interaction.isStringSelectMenu() && interaction.customId === "config_category") {
+    const cat = interaction.values[0];
+    const cfg = loadConfig();
+    const { embed, rows } = buildCategoryEmbed(cat, cfg);
+    return interaction.update({ embeds: [embed], components: rows });
+  }
+
   // ── BOUTONS ──
   if (interaction.isButton()) {
-    // Accepter le règlement
+
+    // ─ Config : retour accueil ─
+    if (interaction.customId === "cfg_back") {
+      const cfg = loadConfig();
+      return interaction.update({ embeds: [buildConfigMainEmbed(cfg)], components: [buildConfigMainRow()] });
+    }
+
+    // ─ Config : toggles ─
+    if (interaction.customId.startsWith("cfg_") && interaction.customId.endsWith("_toggle")) {
+      const bot = interaction.customId.replace("cfg_", "").replace("_toggle", "");
+      const cfg = loadConfig();
+      if (bot === "vittel")    { cfg.vittel.enabled    = !cfg.vittel.enabled;    saveConfig(cfg); startVittelBot(); }
+      if (bot === "descamps")  { cfg.descamps.enabled  = !cfg.descamps.enabled;  saveConfig(cfg); startDescampsBot(); }
+      if (bot === "tarnec")    { cfg.tarnec.enabled    = !cfg.tarnec.enabled;    saveConfig(cfg); startTarnecBot(); }
+      if (bot === "stat")      { cfg.statserveur_auto  = !cfg.statserveur_auto;  saveConfig(cfg); startStatServeurAuto(); }
+      const realCat = bot === "stat" ? "statserveur" : bot;
+      const { embed, rows } = buildCategoryEmbed(realCat, loadConfig());
+      return interaction.update({ embeds: [embed], components: rows });
+    }
+
+    // ─ Config : intervalle (ouvre modale) ─
+    if (interaction.customId.startsWith("cfg_") && interaction.customId.endsWith("_interval")) {
+      const bot = interaction.customId.replace("cfg_", "").replace("_interval", "");
+      const cfg = loadConfig();
+      const current = bot === "vittel" ? cfg.vittel.interval_minutes : bot === "descamps" ? cfg.descamps.interval_minutes : bot === "tarnec" ? cfg.tarnec.interval_minutes : cfg.statserveur_interval_minutes;
+      const modal = new ModalBuilder()
+        .setCustomId(`modal_interval_${bot}`)
+        .setTitle(`⏱️ Intervalle — ${bot}`);
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId("interval_value").setLabel(`Intervalle en minutes (actuel: ${current})`).setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Ex: 30"),
+        ),
+      );
+      return interaction.showModal(modal);
+    }
+
+    // ─ Config : thème ─
+    if (interaction.customId.startsWith("cfg_") && interaction.customId.endsWith("_theme")) {
+      const bot = interaction.customId.replace("cfg_", "").replace("_theme", "");
+      const cfg = loadConfig();
+      const current = bot === "vittel" ? cfg.vittel.theme : cfg.tarnec.theme;
+      const modal = new ModalBuilder()
+        .setCustomId(`modal_theme_${bot}`)
+        .setTitle(`🎯 Thème — ${bot}`);
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId("theme_value").setLabel(`Thème actuel : ${current}`).setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Ex: La France, L'Inde..."),
+        ),
+      );
+      return interaction.showModal(modal);
+    }
+
+    // ─ Config : salon statserveur ─
+    if (interaction.customId === "cfg_stat_salon") {
+      const modal = new ModalBuilder().setCustomId("modal_stat_salon").setTitle("📡 Salon StatServeur");
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId("stat_salon_id").setLabel("ID du salon (colle l'ID Discord)").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Ex: 1487136083132284951"),
+        ),
+      );
+      return interaction.showModal(modal);
+    }
+
+    // ─ Config : cookie Falix ─
+    if (interaction.customId === "cfg_falix_cookie") {
+      const modal = new ModalBuilder().setCustomId("modal_falix_cookie").setTitle("🍪 Cookie FalixNodes");
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId("falix_cookie_value").setLabel("Cookie de session FalixNodes").setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder("Colle ton cookie ici..."),
+        ),
+      );
+      return interaction.showModal(modal);
+    }
+
+    // ─ Config : vérifier port Falix ─
+    if (interaction.customId === "cfg_falix_check") {
+      await interaction.deferUpdate();
+      await checkBedrockPort();
+      const cfg = loadConfig();
+      const { embed, rows } = buildCategoryEmbed("falix", cfg);
+      return interaction.editReply({ embeds: [embed], components: rows });
+    }
+
+    // ─ Config : blague add (ouvre modale) ─
+    if (interaction.customId === "cfg_blague_add") {
+      const modal = new ModalBuilder().setCustomId("modal_blague_add").setTitle("➕ Ajouter une blague");
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId("blague_joke").setLabel("La question / la blague").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Ex: Pourquoi Creeper est triste ?"),
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId("blague_answer").setLabel("La réponse (optionnel)").setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder("Ex: Parce qu'il explose ses amitiés 💥"),
+        ),
+      );
+      return interaction.showModal(modal);
+    }
+
+    // ─ Config : blague supprimer ─
+    if (interaction.customId === "cfg_blague_del") {
+      const blagues = loadBlagues();
+      const modal   = new ModalBuilder().setCustomId("modal_blague_del").setTitle("🗑️ Supprimer une blague");
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId("blague_num").setLabel(`Numéro à supprimer (1–${blagues.length})`).setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Ex: 3"),
+        ),
+      );
+      return interaction.showModal(modal);
+    }
+
+    // ─ Config : blague reset ─
+    if (interaction.customId === "cfg_blague_reset") {
+      saveBlagues([...BLAGUES_DEFAULT]);
+      const cfg = loadConfig();
+      const { embed, rows } = buildCategoryEmbed("blagues", cfg);
+      return interaction.update({ embeds: [embed], components: rows });
+    }
+
+    // ─ Règlement ─
     if (interaction.customId === "accept_rules") {
       try {
         const roleJoueur = interaction.guild.roles.cache.get(C.ROLE_JOUEUR);
@@ -1052,21 +1495,25 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    if (interaction.customId === "show_ip") return interaction.reply({ embeds: [makeEmbed({ color: C.GOLD, title: "🎮 IP du serveur Soulakri", thumbnail: C.LOGO_URL, fields: [{ name: "📡 Adresse", value: `\`\`\`${C.MC_IP}\`\`\``, inline: false }, { name: "🔌 Port Java", value: `\`\`\`${C.MC_PORT}\`\`\``, inline: false }] })], ephemeral: true });
-    if (interaction.customId === "show_reglement_link") return interaction.reply({ content: `📜 Le règlement : <#${C.CHANNEL_REGLEMENT}>`, ephemeral: true });
+    if (interaction.customId === "show_ip") {
+      return interaction.reply({ embeds: [makeEmbed({ color: C.GOLD, title: "🎮 IP du serveur Soulakri", thumbnail: C.LOGO_URL, fields: [{ name: "📡 Adresse", value: `\`\`\`${C.MC_IP}\`\`\``, inline: false }, { name: "🔌 Port Java", value: `\`\`\`${C.MC_PORT}\`\`\``, inline: false }] })], ephemeral: true });
+    }
+    if (interaction.customId === "show_reglement_link") {
+      return interaction.reply({ content: `📜 Le règlement : <#${C.CHANNEL_REGLEMENT}>`, ephemeral: true });
+    }
 
-    // Fermer ticket + transcript
+    // ─ Fermer ticket ─
     if (interaction.customId === "close_ticket") {
       await interaction.reply({ content: "📄 Génération du transcript..." });
       try {
-        const channel = interaction.channel;
-        const messages = await channel.messages.fetch({ limit: 100 });
-        const sorted   = [...messages.values()].reverse();
-        const lines    = sorted.map(m => `[${new Date(m.createdTimestamp).toLocaleString("fr-FR")}] ${m.author.tag}: ${m.content || "(embed/attachment)"}`);
+        const channel   = interaction.channel;
+        const messages  = await channel.messages.fetch({ limit: 100 });
+        const sorted    = [...messages.values()].reverse();
+        const lines     = sorted.map(m => `[${new Date(m.createdTimestamp).toLocaleString("fr-FR")}] ${m.author.tag}: ${m.content || "(embed/attachment)"}`);
         const transcript = `=== TRANSCRIPT — ${channel.name} ===\nFermé par : ${interaction.user.tag}\nDate : ${new Date().toLocaleString("fr-FR")}\n\n${lines.join("\n")}`;
-        const buf = Buffer.from(transcript, "utf8");
+        const buf        = Buffer.from(transcript, "utf8");
         const attachment = new AttachmentBuilder(buf, { name: `transcript-${channel.name}.txt` });
-        const logCh = interaction.guild.channels.cache.get(C.CHANNEL_LOGS);
+        const logCh      = interaction.guild.channels.cache.get(C.CHANNEL_LOGS);
         if (logCh) {
           await logCh.send({ embeds: [makeEmbed({ color: C.PURPLE, title: "📄 Ticket fermé — Transcript", description: `**Salon :** \`${channel.name}\`\nFermé par : ${interaction.user}\nMessages : **${sorted.length}**` })], files: [attachment] });
         }
@@ -1076,13 +1523,67 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    // Bouton "another_joke"
+    // ─ Blague suivante ─
     if (interaction.customId === "another_joke") {
-      const b = BLAGUES[Math.floor(Math.random() * BLAGUES.length)];
+      const blagues = loadBlagues();
+      const b = blagues[Math.floor(Math.random() * blagues.length)];
       return interaction.update({ embeds: [makeEmbed({ color: C.ORANGE, title: "😂 Blague aléatoire", fields: [{ name: "❓", value: b.joke }, { name: "💡", value: b.answer }] })], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("another_joke").setLabel("😂 Une autre !").setStyle(ButtonStyle.Primary))] });
     }
 
-    // Pagination TOP
+    // ─ Sondage : fermer ─
+    if (interaction.customId === "poll_close") {
+      if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+        return interaction.reply({ content: "❌ Seul un modérateur peut fermer le sondage.", ephemeral: true });
+      }
+      const oldEmbed = interaction.message.embeds[0];
+      const closedEmbed = EmbedBuilder.from(oldEmbed)
+        .setColor(C.RED)
+        .setFooter({ text: `Sondage fermé par ${interaction.user.tag}` });
+      return interaction.update({ embeds: [closedEmbed], components: [] });
+    }
+
+    // ─ Sondage : résultats ─
+    if (interaction.customId === "poll_results") {
+      const msg       = interaction.message;
+      const reactions = msg.reactions.cache;
+      const emojis    = ["1️⃣","2️⃣","3️⃣","4️⃣","✅","❌"];
+      let results     = "";
+      for (const emoji of emojis) {
+        const r = reactions.get(emoji);
+        if (r) results += `${emoji} — **${r.count - 1}** vote(s)\n`;
+      }
+      return interaction.reply({ embeds: [makeEmbed({ color: C.PURPLE, title: "📊 Résultats en direct", description: results || "*Aucun vote pour l'instant.*" })], ephemeral: true });
+    }
+
+    // ─ Serverinfo : catégorie ─
+    if (interaction.customId.startsWith("sinfo_")) {
+      const cat   = interaction.customId.replace("sinfo_", "");
+      const guild = interaction.guild;
+      await guild.fetch(); await guild.members.fetch();
+
+      let embed;
+      if (cat === "membres") {
+        const bots   = guild.members.cache.filter(m => m.user.bot).size;
+        const humans = guild.memberCount - bots;
+        const online = guild.members.cache.filter(m => m.presence?.status === "online").size;
+        embed = makeEmbed({ color: C.CYAN, title: "👥 Membres — Soulakri", fields: [{ name: "👤 Humains", value: `**${humans}**`, inline: true }, { name: "🤖 Bots", value: `**${bots}**`, inline: true }, { name: "🟢 En ligne", value: `**${online}**`, inline: true }, { name: "👑 Propriétaire", value: `<@${guild.ownerId}>`, inline: true }] });
+      } else if (cat === "salons") {
+        const texts    = guild.channels.cache.filter(c => c.type === ChannelType.GuildText).size;
+        const voices   = guild.channels.cache.filter(c => c.type === ChannelType.GuildVoice).size;
+        const cats     = guild.channels.cache.filter(c => c.type === ChannelType.GuildCategory).size;
+        embed = makeEmbed({ color: C.BLUE, title: "💬 Salons — Soulakri", fields: [{ name: "📝 Texte", value: `**${texts}**`, inline: true }, { name: "🔊 Vocal", value: `**${voices}**`, inline: true }, { name: "📁 Catégories", value: `**${cats}**`, inline: true }] });
+      } else if (cat === "roles") {
+        const roleList = guild.roles.cache.filter(r => r.id !== guild.id).sort((a, b) => b.position - a.position).first(15).map(r => r.toString()).join(" ");
+        embed = makeEmbed({ color: C.PURPLE, title: "🎭 Rôles — Soulakri", description: roleList || "*Aucun rôle*" });
+      } else if (cat === "boost") {
+        embed = makeEmbed({ color: C.PINK, title: "🚀 Boosts — Soulakri", fields: [{ name: "🚀 Boosts", value: `**${guild.premiumSubscriptionCount}**`, inline: true }, { name: "📊 Niveau", value: `**${guild.premiumTier}**`, inline: true }] });
+      }
+
+      const row = buildServerInfoRow();
+      return interaction.update({ embeds: [embed], components: [row] });
+    }
+
+    // ─ Pagination TOP ─
     if (interaction.customId.startsWith("top_page_")) {
       const page = parseInt(interaction.customId.replace("top_page_", ""));
       return handleTopPage(interaction, page, true);
@@ -1099,7 +1600,7 @@ client.on("interactionCreate", async (interaction) => {
   // ══════════════════════════════════════════════════════════
   if (cmd === "help") {
     return interaction.reply({ embeds: [makeEmbed({
-      color: C.BLUE, author: { name: "Soulakri Bot v12 — Aide", iconURL: C.LOGO_URL },
+      color: C.BLUE, author: { name: "Soulakri Bot v13 — Aide", iconURL: C.LOGO_URL },
       title: "📖 Commandes disponibles", thumbnail: C.LOGO_URL,
       fields: [
         { name: "── 🎮 Minecraft ──",   value: "`/ip` `/bedrock` `/stats` `/joueurs` `/statserveur`", inline: false },
@@ -1137,16 +1638,38 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   // ══════════════════════════════════════════════════════════
-  //  SERVERINFO
+  //  SERVERINFO — avec boutons catégories
   // ══════════════════════════════════════════════════════════
   if (cmd === "serverinfo") {
     await interaction.deferReply();
     const guild = interaction.guild;
     await guild.fetch(); await guild.members.fetch();
-    const bots = guild.members.cache.filter(m => m.user.bot).size, humans = guild.memberCount - bots;
-    const texts = guild.channels.cache.filter(c => c.type === ChannelType.GuildText).size, voices = guild.channels.cache.filter(c => c.type === ChannelType.GuildVoice).size;
-    const owner = await guild.fetchOwner(), verif = ["Aucune", "Faible", "Moyenne", "Élevée", "Très élevée"][guild.verificationLevel] ?? "Inconnue";
-    return interaction.editReply({ embeds: [makeEmbed({ color: C.CYAN, author: { name: guild.name, iconURL: guild.iconURL({ dynamic: true }) || C.LOGO_URL }, title: "🌐 Informations du serveur", thumbnail: guild.iconURL({ dynamic: true, size: 256 }) || C.LOGO_URL, fields: [{ name: "👑 Propriétaire", value: owner.toString(), inline: true }, { name: "📅 Créé le", value: `<t:${Math.floor(guild.createdTimestamp / 1000)}:D>`, inline: true }, { name: "🆔 ID", value: `\`${guild.id}\``, inline: true }, { name: "👥 Membres", value: `👤 ${humans} humains\n🤖 ${bots} bots`, inline: true }, { name: "💬 Salons", value: `📝 ${texts} texte\n🔊 ${voices} vocal`, inline: true }, { name: "🎭 Rôles", value: `${guild.roles.cache.size - 1}`, inline: true }, { name: "🚀 Boosts", value: `${guild.premiumSubscriptionCount} — Niv. ${guild.premiumTier}`, inline: true }, { name: "🔒 Vérification", value: verif, inline: true }, { name: "🎮 Serveur MC", value: `\`${C.MC_IP}:${C.MC_PORT}\``, inline: true }] })] });
+    const bots   = guild.members.cache.filter(m => m.user.bot).size;
+    const humans = guild.memberCount - bots;
+    const texts  = guild.channels.cache.filter(c => c.type === ChannelType.GuildText).size;
+    const voices = guild.channels.cache.filter(c => c.type === ChannelType.GuildVoice).size;
+    const owner  = await guild.fetchOwner();
+    const verif  = ["Aucune", "Faible", "Moyenne", "Élevée", "Très élevée"][guild.verificationLevel] ?? "Inconnue";
+
+    const embed = makeEmbed({
+      color:       C.CYAN,
+      author:      { name: guild.name, iconURL: guild.iconURL({ dynamic: true }) || C.LOGO_URL },
+      title:       "🌐 Informations du serveur Soulakri",
+      description: `> Serveur fondé le <t:${Math.floor(guild.createdTimestamp / 1000)}:D>`,
+      thumbnail:   guild.iconURL({ dynamic: true, size: 256 }) || C.LOGO_URL,
+      fields: [
+        { name: "👑 Propriétaire",  value: owner.toString(),                         inline: true },
+        { name: "🆔 ID",            value: `\`${guild.id}\``,                        inline: true },
+        { name: "🔒 Vérification",  value: verif,                                    inline: true },
+        { name: "👥 Membres",       value: `👤 ${humans} humains · 🤖 ${bots} bots`, inline: true },
+        { name: "💬 Salons",        value: `📝 ${texts} · 🔊 ${voices}`,             inline: true },
+        { name: "🎭 Rôles",         value: `${guild.roles.cache.size - 1}`,          inline: true },
+        { name: "🚀 Boosts",        value: `${guild.premiumSubscriptionCount} — Niv. ${guild.premiumTier}`, inline: true },
+        { name: "🎮 Serveur MC",    value: `\`${C.MC_IP}:${C.MC_PORT}\``,           inline: true },
+      ],
+    });
+
+    return interaction.editReply({ embeds: [embed], components: [buildServerInfoRow()] });
   }
 
   // ══════════════════════════════════════════════════════════
@@ -1173,7 +1696,7 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   // ══════════════════════════════════════════════════════════
-  //  TOP — pagination
+  //  TOP
   // ══════════════════════════════════════════════════════════
   if (cmd === "top") {
     return handleTopPage(interaction, 1, false);
@@ -1194,47 +1717,38 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   // ══════════════════════════════════════════════════════════
-  //  BLAGUE
+  //  BLAGUE — charge depuis le fichier JSON
   // ══════════════════════════════════════════════════════════
   if (cmd === "blague") {
-    const b = BLAGUES[Math.floor(Math.random() * BLAGUES.length)];
-    return interaction.reply({ embeds: [makeEmbed({ color: C.ORANGE, title: "😂 Blague Minecraft", thumbnail: C.LOGO_URL, fields: [{ name: "❓ Question", value: b.joke }, { name: "💡 Réponse", value: b.answer }] })], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("another_joke").setLabel("😂 Une autre !").setStyle(ButtonStyle.Primary))] });
+    const blagues = loadBlagues();
+    const b = blagues[Math.floor(Math.random() * blagues.length)];
+    return interaction.reply({ embeds: [makeEmbed({ color: C.ORANGE, title: "😂 Blague", thumbnail: C.LOGO_URL, fields: [{ name: "❓ Question", value: b.joke }, { name: "💡 Réponse", value: b.answer }] })], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("another_joke").setLabel("😂 Une autre !").setStyle(ButtonStyle.Primary))] });
   }
 
   // ══════════════════════════════════════════════════════════
-  //  SOULES — embed + son en pièce jointe
+  //  SOULES
   // ══════════════════════════════════════════════════════════
   if (cmd === "soules") {
     await interaction.deferReply();
-    // Ouvre une fenêtre de dodge pour la cible mentionnée (et pour tout le monde)
     setDodgeWindow(interaction.user.id, "soules");
-    const attachment = await sendMp3Attachment(interaction, "soules", "soules.mp3");
-    const payload = { embeds: [makeEmbed({ color: 0xFF6600, title: "🔥 FLASH OUT ! Soules balance une flash !", description: `${interaction.user} invoque **SOULES** ! 🌟\n*Run it back !*\n\n💡 Tape \`/dodge\` dans les 10s pour esquiver !`, image: "https://i.imgur.com/FLkhWWO.gif" })] };
-    if (attachment) payload.files = [attachment];
-    return interaction.editReply(payload);
+    return interaction.editReply({ embeds: [makeEmbed({ color: 0xFF6600, title: "🔥 FLASH OUT ! Soules balance une flash !", description: `${interaction.user} invoque **SOULES** ! 🌟\n*Run it back !*\n\n💡 Tape \`/dodge\` dans les 10s pour esquiver !`, image: "https://i.imgur.com/FLkhWWO.gif" })] });
   }
 
   // ══════════════════════════════════════════════════════════
-  //  GIRY — embed + son en pièce jointe
+  //  GIRY
   // ══════════════════════════════════════════════════════════
   if (cmd === "giry") {
     await interaction.deferReply();
     setDodgeWindow(interaction.user.id, "giry");
-    const attachment = await sendMp3Attachment(interaction, "giry", "giry.mp3");
-    const payload = { embeds: [makeEmbed({ color: 0x4CAF50, title: "💚 SEEKERS OUT ! Giry envoie la flash de Skye !", description: `${interaction.user} joue **GIRY** ! 🦅\n*T'as les yeux dans ta poche !*\n\n💡 Tape \`/dodge\` dans les 10s !`, image: "https://i.imgur.com/3h3Y01m.gif" })] };
-    if (attachment) payload.files = [attachment];
-    return interaction.editReply(payload);
+    return interaction.editReply({ embeds: [makeEmbed({ color: 0x4CAF50, title: "💚 SEEKERS OUT ! Giry envoie la flash de Skye !", description: `${interaction.user} joue **GIRY** ! 🦅\n*T'as les yeux dans ta poche !*\n\n💡 Tape \`/dodge\` dans les 10s !`, image: "https://i.imgur.com/3h3Y01m.gif" })] });
   }
 
   // ══════════════════════════════════════════════════════════
   //  DODGE
   // ══════════════════════════════════════════════════════════
   if (cmd === "dodge") {
-    const w = dodgeWindows.get(interaction.user.id);
-    if (!w || Date.now() > w.expiresAt) {
-      return interaction.reply({ embeds: [makeEmbed({ color: C.RED, title: "❌ Pas de flash à esquiver !", description: "Aucune flash active dans ta fenêtre. Trop lent ou personne ne t'a ciblé. 😎" })], ephemeral: true });
-    }
-    dodgeWindows.delete(interaction.user.id);
+    const w = canDodge(interaction.user.id);
+    if (!w) return interaction.reply({ embeds: [makeEmbed({ color: C.RED, title: "❌ Pas de flash à esquiver !", description: "Aucune flash active dans ta fenêtre. Trop lent ou personne ne t'a ciblé. 😎" })], ephemeral: true });
     return interaction.reply({ embeds: [makeEmbed({ color: C.CYAN, title: "🌀 ESQUIVE ! Matrix mode activé !", description: `${interaction.user} esquive la **${w.commandName}** de justesse ! 💨\n\n> *"Tu m'auras pas."* 😎`, thumbnail: interaction.user.displayAvatarURL({ dynamic: true }) })] });
   }
 
@@ -1263,48 +1777,43 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   // ══════════════════════════════════════════════════════════
-  //  BAKRI — vocal + son
+  //  BAKRI — vocal + son (SEULE commande avec feature son)
   // ══════════════════════════════════════════════════════════
   if (cmd === "bakri") {
     await interaction.deferReply();
     const audioResult = await playInVoice(interaction.member, SOUNDS.bakri);
-    const embed = makeEmbed({
-      color: 0x00BFFF, title: "⚛️ M. Bakri — Cours de Physique",
-      description: `${interaction.user} invoque **M. Bakri** ! 🧪\n\n> *"Alors, qui peut me rappeler la formule ?"*\n> *RKO depuis le bureau* 🪑💥`,
-      thumbnail: C.LOGO_URL,
-      fields: [
-        { name: "📚 Matière",   value: "`Physique-Chimie`", inline: true },
-        { name: "🥋 Technique", value: "`RKO niveau 5`",    inline: true },
-        { name: "🔊 Audio",     value: audioResult.ok ? "✅ Son joué en vocal !" : audioResult.reason === "not_in_voice" ? "⚠️ Rejoins un salon vocal !" : "⚠️ Son non disponible (placeholder)", inline: true },
-      ],
-    });
-    return interaction.editReply({ embeds: [embed] });
+    if (!audioResult.ok && audioResult.reason === "not_in_voice") {
+      const attachment = await sendMp3Attachment(interaction, "bakri", "bakri.mp3");
+      const payload = {
+        embeds: [makeEmbed({ color: 0x00BFFF, title: "⚛️ M. Bakri — Cours de Physique", description: `${interaction.user} invoque **M. Bakri** ! 🧪\n\n> *"Alors, qui peut me rappeler la formule ?"*\n> *RKO depuis le bureau* 🪑💥`, thumbnail: C.LOGO_URL, fields: [{ name: "📚 Matière", value: "`Physique-Chimie`", inline: true }, { name: "🥋 Technique", value: "`RKO niveau 5`", inline: true }, { name: "🔊 Audio", value: "⚠️ Rejoins un vocal ! Son envoyé ici.", inline: true }] })],
+      };
+      if (attachment) payload.files = [attachment];
+      return interaction.editReply(payload);
+    }
+    return interaction.editReply({ embeds: [makeEmbed({ color: 0x00BFFF, title: "⚛️ M. Bakri — Cours de Physique", description: `${interaction.user} invoque **M. Bakri** ! 🧪\n\n> *"Alors, qui peut me rappeler la formule ?"*\n> *RKO depuis le bureau* 🪑💥`, thumbnail: C.LOGO_URL, fields: [{ name: "📚 Matière", value: "`Physique-Chimie`", inline: true }, { name: "🥋 Technique", value: "`RKO niveau 5`", inline: true }, { name: "🔊 Audio", value: audioResult.ok ? "✅ Son joué en vocal !" : "⚠️ Erreur audio.", inline: true }] })] });
   }
 
   // ══════════════════════════════════════════════════════════
-  //  NAIM — vocal + son (son différent de bakri)
+  //  NAIM — vocal + son (SEULE commande avec feature son)
   // ══════════════════════════════════════════════════════════
   if (cmd === "naim") {
     await interaction.deferReply();
     const audioResult = await playInVoice(interaction.member, SOUNDS.naim);
-    const embed = makeEmbed({
-      color: C.PURPLE, title: "🎤 Naim — Le son du goat",
-      description: `${interaction.user} balance le son de **Naim** ! 🔥\n\n> *C'est lui le vrai goat, tout le monde le sait.*\n> *Le son résonne dans tout le vocal.* 🎵`,
-      thumbnail: C.LOGO_URL,
-      fields: [
-        { name: "🎤 Artiste",  value: "`Naim`",             inline: true },
-        { name: "🎵 Qualité",  value: "`Banger absolu`",    inline: true },
-        { name: "🔊 Audio",    value: audioResult.ok ? "✅ Son joué en vocal !" : audioResult.reason === "not_in_voice" ? "⚠️ Rejoins un salon vocal !" : "⚠️ Son non disponible (placeholder)", inline: true },
-      ],
-    });
-    return interaction.editReply({ embeds: [embed] });
+    if (!audioResult.ok && audioResult.reason === "not_in_voice") {
+      const attachment = await sendMp3Attachment(interaction, "naim", "naim.mp3");
+      const payload = {
+        embeds: [makeEmbed({ color: C.PURPLE, title: "🎤 Naim — Le son du goat", description: `${interaction.user} balance le son de **Naim** ! 🔥\n\n> *C'est lui le vrai goat, tout le monde le sait.*\n> *Le son résonne dans tout le vocal.* 🎵`, thumbnail: C.LOGO_URL, fields: [{ name: "🎤 Artiste", value: "`Naim`", inline: true }, { name: "🎵 Qualité", value: "`Banger absolu`", inline: true }, { name: "🔊 Audio", value: "⚠️ Rejoins un vocal ! Son envoyé ici.", inline: true }] })],
+      };
+      if (attachment) payload.files = [attachment];
+      return interaction.editReply(payload);
+    }
+    return interaction.editReply({ embeds: [makeEmbed({ color: C.PURPLE, title: "🎤 Naim — Le son du goat", description: `${interaction.user} balance le son de **Naim** ! 🔥\n\n> *C'est lui le vrai goat, tout le monde le sait.*\n> *Le son résonne dans tout le vocal.* 🎵`, thumbnail: C.LOGO_URL, fields: [{ name: "🎤 Artiste", value: "`Naim`", inline: true }, { name: "🎵 Qualité", value: "`Banger absolu`", inline: true }, { name: "🔊 Audio", value: audioResult.ok ? "✅ Son joué en vocal !" : "⚠️ Erreur audio.", inline: true }] })] });
   }
 
   // ══════════════════════════════════════════════════════════
-  //  BOBARD
+  //  BOBARD — sans son
   // ══════════════════════════════════════════════════════════
   if (cmd === "bobard") {
-    await interaction.deferReply();
     const bobards = [
       { claim: "Elsa Bobert a dit que les maths c'est facile", verdict: "BOBARD 🤥", detail: "Personne ayant un cerveau ne dirait ça." },
       { claim: "Elsa Bobert a rendu son devoir à l'heure", verdict: "BOBARD 🤥", detail: "Impossible. Scientifiquement prouvé." },
@@ -1313,45 +1822,22 @@ client.on("interactionCreate", async (interaction) => {
       { claim: "Elsa Bobert a trouvé la réponse à la question de Vittel", verdict: "VRAI POSSIBLE ✅", detail: "...mais le hasard peut faire des miracles." },
     ];
     const b = bobards[Math.floor(Math.random() * bobards.length)];
-    const attachment = await sendMp3Attachment(interaction, "bobard", "bobard.mp3");
-    const payload = {
-      embeds: [makeEmbed({
-        color:   C.PINK,
-        title:   "🤥 BOBARD DÉTECTEUR — Elsa Bobert Edition",
-        description: `**Affirmation :** *"${b.claim}"*\n\n**Verdict : ${b.verdict}**\n\n> ${b.detail}`,
-        thumbnail: C.LOGO_URL,
-        fields: [{ name: "🎭 Sujet", value: "`Elsa Bobert`", inline: true }, { name: "🔬 Source", value: "`Bobard-o-mètre v2`", inline: true }],
-      })],
-    };
-    if (attachment) payload.files = [attachment];
-    return interaction.editReply(payload);
+    return interaction.reply({ embeds: [makeEmbed({ color: C.PINK, title: "🤥 BOBARD DÉTECTEUR — Elsa Bobert Edition", description: `**Affirmation :** *"${b.claim}"*\n\n**Verdict : ${b.verdict}**\n\n> ${b.detail}`, thumbnail: C.LOGO_URL, fields: [{ name: "🎭 Sujet", value: "`Elsa Bobert`", inline: true }, { name: "🔬 Source", value: "`Bobard-o-mètre v2`", inline: true }] })] });
   }
 
   // ══════════════════════════════════════════════════════════
-  //  RAOUDI
+  //  RAOUDI — sans son
   // ══════════════════════════════════════════════════════════
   if (cmd === "raoudi") {
     await interaction.deferReply();
     const target = await interaction.guild.members.fetch("852993628242575390").catch(() => null);
-    const attachment = await sendMp3Attachment(interaction, "raoudi", "raoudi.mp3");
-    const payload = {
-      embeds: [makeEmbed({
-        color: C.GOLD, title: "🎰 Le Compte de Raoudi",
-        author: target ? { name: target.user.username, iconURL: target.user.displayAvatarURL({ dynamic: true }) } : { name: "Raoudi", iconURL: C.LOGO_URL },
-        description: target ? `Voilà le fameux **${target.user.username}** ! 👀\n\n> *"C'est moi le vrai Raoudi."* 😎` : `❌ Raoudi s'est **barré** ou est introuvable...`,
-        thumbnail: target ? target.user.displayAvatarURL({ dynamic: true }) : C.LOGO_URL,
-        fields: target ? [{ name: "🏷️ Tag", value: `\`${target.user.tag}\``, inline: true }, { name: "📅 Sur le serveur depuis", value: `<t:${Math.floor(target.joinedTimestamp / 1000)}:R>`, inline: true }, { name: "🎭 Rôles", value: `${target.roles.cache.size - 1}`, inline: true }] : [],
-      })],
-    };
-    if (attachment) payload.files = [attachment];
-    return interaction.editReply(payload);
+    return interaction.editReply({ embeds: [makeEmbed({ color: C.GOLD, title: "🎰 Le Compte de Raoudi", author: target ? { name: target.user.username, iconURL: target.user.displayAvatarURL({ dynamic: true }) } : { name: "Raoudi", iconURL: C.LOGO_URL }, description: target ? `Voilà le fameux **${target.user.username}** ! 👀\n\n> *"C'est moi le vrai Raoudi."* 😎` : `❌ Raoudi s'est **barré** ou est introuvable...`, thumbnail: target ? target.user.displayAvatarURL({ dynamic: true }) : C.LOGO_URL, fields: target ? [{ name: "🏷️ Tag", value: `\`${target.user.tag}\``, inline: true }, { name: "📅 Sur le serveur depuis", value: `<t:${Math.floor(target.joinedTimestamp / 1000)}:R>`, inline: true }, { name: "🎭 Rôles", value: `${target.roles.cache.size - 1}`, inline: true }] : [] })] });
   }
 
   // ══════════════════════════════════════════════════════════
-  //  OBLED
+  //  OBLED — sans son
   // ══════════════════════════════════════════════════════════
   if (cmd === "obled") {
-    await interaction.deferReply();
     const codes = [
       "print('Bonjour M. Obled')",
       "while True:\n    print('Thonny crash encore')",
@@ -1360,26 +1846,15 @@ client.on("interactionCreate", async (interaction) => {
       "def cours_python():\n    pass  # TODO: comprendre",
     ];
     const code = codes[Math.floor(Math.random() * codes.length)];
-    const attachment = await sendMp3Attachment(interaction, "obled", "obled.mp3");
-    const payload = {
-      embeds: [makeEmbed({ color: 0x3776AB, title: "🐍 M. Obled — Cours de Python", description: `${interaction.user} ouvre **Thonny**... 💻\n\n\`\`\`python\n${code}\n\`\`\`\n> *"Alors, vous voyez l'erreur ?"* 🤓`, thumbnail: C.LOGO_URL, fields: [{ name: "🛠️ IDE", value: "`Thonny 4.x`", inline: true }, { name: "🐍 Langage", value: "`Python 3`", inline: true }, { name: "📊 TPS cours", value: "`2.0 (ça lag)`", inline: true }] })],
-    };
-    if (attachment) payload.files = [attachment];
-    return interaction.editReply(payload);
+    return interaction.reply({ embeds: [makeEmbed({ color: 0x3776AB, title: "🐍 M. Obled — Cours de Python", description: `${interaction.user} ouvre **Thonny**... 💻\n\n\`\`\`python\n${code}\n\`\`\`\n> *"Alors, vous voyez l'erreur ?"* 🤓`, thumbnail: C.LOGO_URL, fields: [{ name: "🛠️ IDE", value: "`Thonny 4.x`", inline: true }, { name: "🐍 Langage", value: "`Python 3`", inline: true }, { name: "📊 TPS cours", value: "`2.0 (ça lag)`", inline: true }] })] });
   }
 
   // ══════════════════════════════════════════════════════════
-  //  BOURGIN
+  //  BOURGIN — sans son
   // ══════════════════════════════════════════════════════════
   if (cmd === "bourgin") {
-    await interaction.deferReply();
     const reussi = Math.random() > 0.4;
-    const attachment = await sendMp3Attachment(interaction, "bourgin", "bourgin.mp3");
-    const payload = {
-      embeds: [makeEmbed({ color: 0x8B4513, title: "🧱 WALL JUMP !!!", description: `${interaction.user} tente le **WALL JUMP** ! 🏃💨\n\n${reussi ? "**BOING** 🚀 — Saut réussi ! M. Bourgin est fier." : "**SPLAT** 💀 — Raté. Le mur dit non."}`, thumbnail: C.LOGO_URL, fields: [{ name: "🧱 Mur touché", value: "`Oui`", inline: true }, { name: "🦘 Saut réussi", value: reussi ? "`OUI 🎉`" : "`NON 💀`", inline: true }, { name: "📐 Angle", value: `\`${Math.floor(Math.random() * 90)}°\``, inline: true }] })],
-    };
-    if (attachment) payload.files = [attachment];
-    return interaction.editReply(payload);
+    return interaction.reply({ embeds: [makeEmbed({ color: 0x8B4513, title: "🧱 WALL JUMP !!!", description: `${interaction.user} tente le **WALL JUMP** ! 🏃💨\n\n${reussi ? "**BOING** 🚀 — Saut réussi ! M. Bourgin est fier." : "**SPLAT** 💀 — Raté. Le mur dit non."}`, thumbnail: C.LOGO_URL, fields: [{ name: "🧱 Mur touché", value: "`Oui`", inline: true }, { name: "🦘 Saut réussi", value: reussi ? "`OUI 🎉`" : "`NON 💀`", inline: true }, { name: "📐 Angle", value: `\`${Math.floor(Math.random() * 90)}°\``, inline: true }] })] });
   }
 
   // ══════════════════════════════════════════════════════════
@@ -1412,15 +1887,38 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   // ══════════════════════════════════════════════════════════
-  //  SONDAGE
+  //  SONDAGE — interface améliorée avec boutons
   // ══════════════════════════════════════════════════════════
   if (cmd === "sondage") {
     const question = interaction.options.getString("question");
-    const choix = [1,2,3,4].map(i => interaction.options.getString(`choix${i}`)).filter(Boolean);
-    const emojis = ["1️⃣","2️⃣","3️⃣","4️⃣"];
-    const msg = await interaction.reply({ embeds: [makeEmbed({ color: C.PURPLE, title: `📊 ${question}`, description: choix.length ? choix.map((c, i) => `${emojis[i]} ${c}`).join("\n\n") : "Réponds avec ✅ ou ❌", fields: [{ name: "📣 Lancé par", value: interaction.user.toString(), inline: true }] })], fetchReply: true });
-    if (choix.length) { for (let i = 0; i < choix.length; i++) await msg.react(emojis[i]).catch(() => {}); }
-    else { await msg.react("✅").catch(() => {}); await msg.react("❌").catch(() => {}); }
+    const choix    = [1, 2, 3, 4].map(i => interaction.options.getString(`choix${i}`)).filter(Boolean);
+    const emojis   = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"];
+
+    const embed = makeEmbed({
+      color:       C.PURPLE,
+      author:      { name: `📊 Sondage — ${interaction.user.username}`, iconURL: interaction.user.displayAvatarURL({ dynamic: true }) },
+      title:       question,
+      description: choix.length
+        ? choix.map((c, i) => `${emojis[i]} **${c}**`).join("\n\n")
+        : "Réponds avec ✅ ou ❌",
+      fields:      [
+        { name: "📣 Lancé par",    value: interaction.user.toString(), inline: true },
+        { name: "🗳️ Participation", value: "Réagis ci-dessous !",       inline: true },
+      ],
+    });
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("poll_results").setLabel("📊 Voir résultats").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("poll_close").setLabel("🔒 Fermer").setStyle(ButtonStyle.Danger),
+    );
+
+    const msg = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
+    if (choix.length) {
+      for (let i = 0; i < choix.length; i++) await msg.react(emojis[i]).catch(() => {});
+    } else {
+      await msg.react("✅").catch(() => {});
+      await msg.react("❌").catch(() => {});
+    }
     return;
   }
 
@@ -1457,13 +1955,13 @@ client.on("interactionCreate", async (interaction) => {
   // ══════════════════════════════════════════════════════════
   if (cmd === "ticket") {
     try {
-      const guild = interaction.guild, member = interaction.member;
+      const guild     = interaction.guild, member = interaction.member;
       const ticketName = `ticket-${member.user.username.toLowerCase().replace(/[^a-z0-9]/g, "-")}`;
-      const existing = guild.channels.cache.find(c => c.name === ticketName);
+      const existing  = guild.channels.cache.find(c => c.name === ticketName);
       if (existing) return interaction.reply({ content: `❌ Ticket déjà ouvert : ${existing}`, ephemeral: true });
-      const category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase().includes("support"));
-      const adminR = guild.roles.cache.get(C.ROLE_ADMIN), modR = guild.roles.cache.get(C.ROLE_MOD);
-      const allow = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory];
+      const category  = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase().includes("support"));
+      const adminR    = guild.roles.cache.get(C.ROLE_ADMIN), modR = guild.roles.cache.get(C.ROLE_MOD);
+      const allow     = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory];
       const overwrites = [{ id: guild.id, deny: [PermissionFlagsBits.ViewChannel] }, { id: member.id, allow }];
       if (adminR) overwrites.push({ id: adminR.id, allow });
       if (modR)   overwrites.push({ id: modR.id, allow });
@@ -1474,7 +1972,7 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   // ══════════════════════════════════════════════════════════
-  //  WARN
+  //  WARN / WARNS / CLEARWARN
   // ══════════════════════════════════════════════════════════
   if (cmd === "warn") {
     const target = interaction.options.getMember("membre");
@@ -1485,25 +1983,11 @@ client.on("interactionCreate", async (interaction) => {
     const warns = addWarn(target.id, interaction.user.id, raison);
     const count = warns.length;
 
-    await interaction.reply({ embeds: [makeEmbed({
-      color:       C.ORANGE,
-      title:       `⚠️ Avertissement — ${target.user.username}`,
-      description: `**${target}** a reçu un avertissement.`,
-      fields: [
-        { name: "📝 Raison",       value: raison,           inline: false },
-        { name: "👮 Par",          value: interaction.user.toString(), inline: true },
-        { name: "🔢 Warns total",  value: `**${count}** / ${C.MAX_WARNS}`, inline: true },
-      ],
-    })] });
-
+    await interaction.reply({ embeds: [makeEmbed({ color: C.ORANGE, title: `⚠️ Avertissement — ${target.user.username}`, description: `**${target}** a reçu un avertissement.`, fields: [{ name: "📝 Raison", value: raison, inline: false }, { name: "👮 Par", value: interaction.user.toString(), inline: true }, { name: "🔢 Warns total", value: `**${count}** / ${C.MAX_WARNS}`, inline: true }] })] });
     logAction(interaction.guild, { title: "⚠️ Warn", description: `**${target.user.tag}** averti par **${interaction.user.tag}**`, color: C.ORANGE, fields: [{ name: "Raison", value: raison }, { name: "Warns total", value: `${count}/${C.MAX_WARNS}` }] });
 
-    // DM à la cible
-    try {
-      await target.user.send({ embeds: [makeEmbed({ color: C.ORANGE, title: `⚠️ Tu as reçu un avertissement sur Soulakri`, description: `**Raison :** ${raison}\n**Warns :** ${count} / ${C.MAX_WARNS}\n\n${count >= C.MAX_WARNS ? "⛔ **Tu as atteint le maximum — un ban a été appliqué automatiquement.**" : ""}` })] });
-    } catch {}
+    try { await target.user.send({ embeds: [makeEmbed({ color: C.ORANGE, title: `⚠️ Tu as reçu un avertissement sur Soulakri`, description: `**Raison :** ${raison}\n**Warns :** ${count} / ${C.MAX_WARNS}\n\n${count >= C.MAX_WARNS ? "⛔ **Tu as atteint le maximum — un ban a été appliqué automatiquement.**" : ""}` })] }); } catch {}
 
-    // Auto-ban à 3 warns
     if (count >= C.MAX_WARNS) {
       try {
         await target.ban({ reason: `Auto-ban — ${C.MAX_WARNS} avertissements accumulés` });
@@ -1515,33 +1999,19 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  // ══════════════════════════════════════════════════════════
-  //  WARNS
-  // ══════════════════════════════════════════════════════════
   if (cmd === "warns") {
     const target = interaction.options.getMember("membre");
     if (!target) return interaction.reply({ content: "❌ Membre introuvable.", ephemeral: true });
     const warns = getWarns(target.id);
     if (!warns.length) return interaction.reply({ embeds: [makeEmbed({ color: C.GREEN, title: `✅ ${target.user.username} — Aucun warn`, description: "Ce membre est clean !" })], ephemeral: true });
-
     const warnList = warns.map((w, i) => `**${i + 1}.** \`ID:${w.id}\`\n> ${w.raison}\n> Par <@${w.moderatorId}> — <t:${Math.floor(w.date / 1000)}:D>`).join("\n\n");
-    return interaction.reply({ embeds: [makeEmbed({
-      color:       C.ORANGE,
-      title:       `⚠️ Warns de ${target.user.username}`,
-      description: warnList,
-      fields:      [{ name: "🔢 Total", value: `**${warns.length}** / ${C.MAX_WARNS}`, inline: true }],
-      thumbnail:   target.user.displayAvatarURL({ dynamic: true }),
-    })], ephemeral: true });
+    return interaction.reply({ embeds: [makeEmbed({ color: C.ORANGE, title: `⚠️ Warns de ${target.user.username}`, description: warnList, fields: [{ name: "🔢 Total", value: `**${warns.length}** / ${C.MAX_WARNS}`, inline: true }], thumbnail: target.user.displayAvatarURL({ dynamic: true }) })], ephemeral: true });
   }
 
-  // ══════════════════════════════════════════════════════════
-  //  CLEARWARN
-  // ══════════════════════════════════════════════════════════
   if (cmd === "clearwarn") {
     const target = interaction.options.getMember("membre");
     const warnId = interaction.options.getString("warn_id");
     if (!target) return interaction.reply({ content: "❌ Membre introuvable.", ephemeral: true });
-
     if (warnId) {
       const id = parseInt(warnId);
       if (isNaN(id)) return interaction.reply({ content: "❌ ID invalide.", ephemeral: true });
@@ -1569,19 +2039,7 @@ client.on("interactionCreate", async (interaction) => {
     const endsAt  = Date.now() + duration * 60 * 1000;
     const channel = interaction.channel;
 
-    const embed = makeEmbed({
-      color:       C.GOLD,
-      title:       "🎉 GIVEAWAY !",
-      description: `Réagis avec 🎉 pour participer !\n\n**Lot :** ${prize}\n**Gagnant(s) :** ${winners}\n**Se termine :** <t:${Math.floor(endsAt / 1000)}:R>`,
-      thumbnail:   C.LOGO_URL,
-      fields: [
-        { name: "⏳ Durée",     value: formatDuration(duration * 60 * 1000), inline: true },
-        { name: "🎁 Lot",       value: prize,                                 inline: true },
-        { name: "🏆 Gagnants",  value: String(winners),                       inline: true },
-        { name: "👤 Lancé par", value: interaction.user.toString(),            inline: true },
-      ],
-    });
-
+    const embed = makeEmbed({ color: C.GOLD, title: "🎉 GIVEAWAY !", description: `Réagis avec 🎉 pour participer !\n\n**Lot :** ${prize}\n**Gagnant(s) :** ${winners}\n**Se termine :** <t:${Math.floor(endsAt / 1000)}:R>`, thumbnail: C.LOGO_URL, fields: [{ name: "⏳ Durée", value: formatDuration(duration * 60 * 1000), inline: true }, { name: "🎁 Lot", value: prize, inline: true }, { name: "🏆 Gagnants", value: String(winners), inline: true }, { name: "👤 Lancé par", value: interaction.user.toString(), inline: true }] });
     const msg = await channel.send({ embeds: [embed] });
     await msg.react("🎉");
 
@@ -1589,7 +2047,6 @@ client.on("interactionCreate", async (interaction) => {
     const giveaways  = loadGiveaways();
     giveaways[giveawayId] = { messageId: msg.id, channelId: channel.id, prize, winners, endsAt, hostId: interaction.user.id, ended: false };
     saveGiveaways(giveaways);
-
     scheduleGiveaway(giveawayId, endsAt);
     return interaction.editReply({ content: `✅ Giveaway lancé dans ${channel} ! Se termine <t:${Math.floor(endsAt / 1000)}:R>.` });
   }
@@ -1642,8 +2099,10 @@ client.on("interactionCreate", async (interaction) => {
   // ══════════════════════════════════════════════════════════
   if (cmd === "mc-objectif") {
     const texte = interaction.options.getString("texte");
-    saveObjectif({ texte, updatedBy: interaction.user.id, updatedAt: Date.now() });
-    return interaction.reply({ embeds: [makeEmbed({ color: C.GOLD, title: "🎯 Objectif mis à jour !", description: `> ${texte}` })], ephemeral: true });
+    const obj   = { texte, updatedBy: interaction.user.id, updatedAt: Date.now() };
+    saveObjectif(obj);
+    await updateObjectifChannel(interaction.guild, obj);
+    return interaction.reply({ embeds: [makeEmbed({ color: C.GOLD, title: "🎯 Objectif mis à jour !", description: `> ${texte}\n\n✅ Salon <#${C.CHANNEL_OBJECTIF}> mis à jour.` })], ephemeral: true });
   }
 
   // ══════════════════════════════════════════════════════════
@@ -1658,29 +2117,63 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   // ══════════════════════════════════════════════════════════
-  //  REGLEMENT
+  //  REGLEMENT — amélioré
   // ══════════════════════════════════════════════════════════
   if (cmd === "reglement") {
     const ch = interaction.guild.channels.cache.get(C.CHANNEL_REGLEMENT);
     if (!ch) return interaction.reply({ content: "❌ Salon règlement introuvable.", ephemeral: true });
-    const embed = makeEmbed({ color: C.GOLD, author: { name: "Soulakri — Règlement officiel", iconURL: C.LOGO_URL }, title: "📜 Règlement du serveur Soulakri", thumbnail: C.LOGO_URL, description: "Bienvenue sur **Soulakri** ! 🎮\nLis les règles ci-dessous et clique **✅ J'accepte** pour débloquer l'accès complet.\n\u200b", fields: [{ name: "1️⃣ Respect mutuel", value: "Insultes, harcèlement et discriminations = ban immédiat.", inline: false }, { name: "2️⃣ Anti-cheat", value: "Tout hack, client modifié ou exploit est interdit.", inline: false }, { name: "3️⃣ Anti-grief", value: "Détruire ou voler les constructions d'autrui est interdit.", inline: false }, { name: "4️⃣ Langage", value: "Pas de spam, flood, caps excessif ni contenu inapproprié.", inline: false }, { name: "5️⃣ Pas de pub", value: "Aucune publicité pour un autre serveur sans autorisation.", inline: false }, { name: "6️⃣ Respect des admins", value: "Les décisions des modérateurs sont définitives.", inline: false }, { name: "7️⃣ Fair-play", value: "Soulakri est un serveur fun. Joue dans l'esprit de la commu ! 🌟", inline: false }, { name: "\u200b", value: "✅ **Si tu acceptes, clique sur le bouton ci-dessous.**" }] }).setFooter({ text: C.FOOTER + " • Règlement v1.0", iconURL: C.LOGO_URL });
+    const embed = makeEmbed({
+      color:       C.GOLD,
+      author:      { name: "Soulakri — Règlement officiel", iconURL: C.LOGO_URL },
+      title:       "📜 Règlement du serveur Soulakri",
+      thumbnail:   C.LOGO_URL,
+      description: "Bienvenue sur **Soulakri** ! 🎮\nLis les règles ci-dessous et clique **✅ J'accepte** pour débloquer l'accès complet.\n\u200b",
+      fields: [
+        { name: "1️⃣  Respect mutuel",     value: "Insultes, harcèlement et discriminations → **ban immédiat**.",              inline: false },
+        { name: "2️⃣  Anti-cheat",         value: "Tout hack, client modifié ou exploit est **strictement interdit**.",        inline: false },
+        { name: "3️⃣  Anti-grief",         value: "Détruire ou voler les constructions d'autrui est **interdit**.",            inline: false },
+        { name: "4️⃣  Langage",            value: "Pas de spam, flood, caps excessif ni contenu inapproprié.",                 inline: false },
+        { name: "5️⃣  Pas de publicité",   value: "Aucune pub pour un autre serveur sans autorisation préalable.",             inline: false },
+        { name: "6️⃣  Respect des admins", value: "Les décisions des modérateurs sont **définitives**.",                      inline: false },
+        { name: "7️⃣  Fair-play",          value: "Soulakri est un serveur fun. Joue dans l'esprit de la commu ! 🌟",         inline: false },
+        { name: "\u200b",                  value: "✅ **Si tu acceptes, clique sur le bouton ci-dessous.**",                   inline: false },
+      ],
+    }).setFooter({ text: `${C.FOOTER} • Règlement v2.0`, iconURL: C.LOGO_URL });
+
     await ch.send({ embeds: [embed], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("accept_rules").setLabel("✅  J'accepte le règlement").setStyle(ButtonStyle.Success))] });
     return interaction.reply({ content: `✅ Règlement posté dans <#${C.CHANNEL_REGLEMENT}> !`, ephemeral: true });
   }
 
   // ══════════════════════════════════════════════════════════
-  //  ROLES
+  //  ROLES — amélioré
   // ══════════════════════════════════════════════════════════
   if (cmd === "roles") {
     const ch = interaction.guild.channels.cache.get(C.CHANNEL_ROLES);
     if (!ch) return interaction.reply({ content: "❌ Salon rôles introuvable.", ephemeral: true });
-    const embed = makeEmbed({ color: C.PURPLE, author: { name: "Soulakri — Choisir ses rôles", iconURL: C.LOGO_URL }, title: "🎭 Choisir ses rôles", thumbnail: C.LOGO_URL, description: "Sélectionne tes rôles dans le menu. Tu peux en choisir **plusieurs** et changer à tout moment !\n\u200b", fields: [{ name: "🔨 Builder", value: "Tu aimes construire", inline: true }, { name: "⚔️ PvP", value: "Tu adores les combats", inline: true }, { name: "🌲 Survie", value: "Joueur survie pur", inline: true }, { name: "🔔 Notifications", value: "Annonces importantes", inline: true }] });
-    const menu = new StringSelectMenuBuilder().setCustomId("role_selector").setPlaceholder("Sélectionne tes rôles...").setMinValues(0).setMaxValues(4).addOptions(
-      new StringSelectMenuOptionBuilder().setLabel("🔨 Builder").setDescription("Tu aimes construire").setValue(C.ROLE_BUILDER).setEmoji("🔨"),
-      new StringSelectMenuOptionBuilder().setLabel("⚔️ PvP").setDescription("Tu adores les combats").setValue(C.ROLE_PVP).setEmoji("⚔️"),
-      new StringSelectMenuOptionBuilder().setLabel("🌲 Survie").setDescription("Joueur survie pur").setValue(C.ROLE_SURVIE).setEmoji("🌲"),
-      new StringSelectMenuOptionBuilder().setLabel("🔔 Notifications").setDescription("Recevoir les annonces").setValue(C.ROLE_NOTIFS).setEmoji("🔔"),
-    );
+    const embed = makeEmbed({
+      color:       C.PURPLE,
+      author:      { name: "Soulakri — Choisir ses rôles", iconURL: C.LOGO_URL },
+      title:       "🎭 Personnalise ton profil Soulakri",
+      thumbnail:   C.LOGO_URL,
+      description: "Sélectionne tes rôles dans le menu déroulant. Tu peux en choisir **plusieurs** et changer à tout moment !\n\u200b",
+      fields: [
+        { name: "🔨 Builder",        value: "Tu aimes construire des structures impressionnantes.",  inline: true },
+        { name: "⚔️ PvP",            value: "Tu adores les combats et la compétition.",              inline: true },
+        { name: "🌲 Survie",          value: "Joueur survie pur, tu aimes explorer et survivre.",    inline: true },
+        { name: "🔔 Notifications",   value: "Reçois les annonces importantes du serveur.",          inline: true },
+      ],
+    });
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId("role_selector")
+      .setPlaceholder("🎭 Sélectionne tes rôles...")
+      .setMinValues(0)
+      .setMaxValues(4)
+      .addOptions(
+        new StringSelectMenuOptionBuilder().setLabel("🔨 Builder").setDescription("Tu aimes construire").setValue(C.ROLE_BUILDER).setEmoji("🔨"),
+        new StringSelectMenuOptionBuilder().setLabel("⚔️ PvP").setDescription("Tu adores les combats").setValue(C.ROLE_PVP).setEmoji("⚔️"),
+        new StringSelectMenuOptionBuilder().setLabel("🌲 Survie").setDescription("Joueur survie pur").setValue(C.ROLE_SURVIE).setEmoji("🌲"),
+        new StringSelectMenuOptionBuilder().setLabel("🔔 Notifications").setDescription("Recevoir les annonces").setValue(C.ROLE_NOTIFS).setEmoji("🔔"),
+      );
     await ch.send({ embeds: [embed], components: [new ActionRowBuilder().addComponents(menu)] });
     return interaction.reply({ content: `✅ Sélecteur posté dans <#${C.CHANNEL_ROLES}> !`, ephemeral: true });
   }
@@ -1689,11 +2182,12 @@ client.on("interactionCreate", async (interaction) => {
   //  VITTEL
   // ══════════════════════════════════════════════════════════
   if (cmd === "vittel") {
-    const ch = interaction.guild.channels.cache.get(C.CHANNEL_MATHS);
+    const cfg = loadConfig();
+    const ch  = interaction.guild.channels.cache.get(cfg.vittel.channel || C.CHANNEL_MATHS);
     if (!ch) return interaction.reply({ content: "❌ Salon maths introuvable.", ephemeral: true });
     if (vittelActive) return interaction.reply({ content: "⚠️ Une question est déjà en cours !", ephemeral: true });
     await runVittelQuestion(ch);
-    return interaction.reply({ content: `✅ Question lancée dans <#${C.CHANNEL_MATHS}> !`, ephemeral: true });
+    return interaction.reply({ content: `✅ Question lancée dans ${ch} !`, ephemeral: true });
   }
 
   // ══════════════════════════════════════════════════════════
@@ -1701,105 +2195,36 @@ client.on("interactionCreate", async (interaction) => {
   // ══════════════════════════════════════════════════════════
   if (cmd === "tarnec-theme") {
     const theme = interaction.options.getString("theme");
-    const cfg = loadConfig();
+    const cfg   = loadConfig();
     cfg.tarnec.theme = theme;
     saveConfig(cfg);
     tarnecFactIndex = 0;
-    // Redémarre le bot avec le nouvel intervalle
     startTarnecBot();
-    return interaction.reply({ embeds: [makeEmbed({ color: 0x8E44AD, title: "🗺️ Thème LeTarnec mis à jour !", description: `Nouveau thème : **${theme}**\n\nLeTarnec BOT va maintenant envoyer des fun facts sur ce sujet !${!TARNEC_FACTS[theme] ? "\n\n⚠️ Thème personnalisé — utilise les facts par défaut pour l'instant." : ""}` })], ephemeral: true });
+    return interaction.reply({ embeds: [makeEmbed({ color: 0x8E44AD, title: "🗺️ Thème LeTarnec mis à jour !", description: `Nouveau thème : **${theme}**${!TARNEC_FACTS[theme] ? "\n\n⚠️ Thème personnalisé — facts par défaut utilisés." : ""}` })], ephemeral: true });
   }
 
   // ══════════════════════════════════════════════════════════
-  //  CONFIG — panneau admin
+  //  CONFIG — panneau global
   // ══════════════════════════════════════════════════════════
   if (cmd === "config") {
-    const sub = interaction.options.getSubcommand();
     const cfg = loadConfig();
-
-    if (sub === "afficher") {
-      return interaction.reply({ embeds: [makeEmbed({
-        color:  C.DARK,
-        title:  "⚙️ Configuration Soulakri BOT v12",
-        thumbnail: C.LOGO_URL,
-        fields: [
-          {
-            name:  "📚 Descamps BOT",
-            value: `**Actif :** ${cfg.descamps.enabled ? "✅" : "❌"}\n**Intervalle :** ${cfg.descamps.interval_minutes} min\n**Salon :** <#${cfg.descamps.channel || C.CHANNEL_DESCAMPS}>`,
-            inline: true,
-          },
-          {
-            name:  "🗺️ LeTarnec BOT",
-            value: `**Actif :** ${cfg.tarnec.enabled ? "✅" : "❌"}\n**Intervalle :** ${cfg.tarnec.interval_minutes} min\n**Salon :** <#${cfg.tarnec.channel || C.CHANNEL_TARNEC}>\n**Thème :** ${cfg.tarnec.theme}`,
-            inline: true,
-          },
-          {
-            name:  "🌐 StatServeur Auto",
-            value: `**Actif :** ${cfg.statserveur_auto ? "✅" : "❌"}\n**Intervalle :** ${cfg.statserveur_interval_minutes} min\n**Salon :** ${cfg.statserveur_channel ? `<#${cfg.statserveur_channel}>` : "*non défini*"}`,
-            inline: true,
-          },
-          {
-            name:  "🔊 Audio (@discordjs/voice)",
-            value: voiceAvailable ? "✅ Installé" : "❌ Non installé — commandes vocales désactivées",
-            inline: true,
-          },
-          {
-            name:  "🎵 Sons (GitHub raw)",
-            value: `Base URL : \`${C.SOUNDS_BASE}\``,
-            inline: false,
-          },
-          {
-            name:  "📋 Fichiers JSON",
-            value: `\`xp_data.json\` · \`warns.json\` · \`giveaways.json\`\n\`objectif.json\` · \`bedrock.json\` · \`birthdays.json\``,
-            inline: false,
-          },
-          {
-            name:  "ℹ️ Commandes config",
-            value: "`/config descamps` · `/config tarnec` · `/config statserveur`\n`/tarnec-theme <theme>` · `/set-cookie`",
-            inline: false,
-          },
-        ],
-      })], ephemeral: true });
-    }
-
-    if (sub === "descamps") {
-      const actif      = interaction.options.getBoolean("actif");
-      const intervalle = interaction.options.getInteger("intervalle");
-      const salon      = interaction.options.getChannel("salon");
-      if (actif      !== null) cfg.descamps.enabled            = actif;
-      if (intervalle !== null) cfg.descamps.interval_minutes   = Math.max(1, intervalle);
-      if (salon)               cfg.descamps.channel            = salon.id;
-      saveConfig(cfg);
-      startDescampsBot();
-      return interaction.reply({ embeds: [makeEmbed({ color: 0xE67E22, title: "✅ Descamps BOT mis à jour !", fields: [{ name: "Actif", value: cfg.descamps.enabled ? "✅" : "❌", inline: true }, { name: "Intervalle", value: `${cfg.descamps.interval_minutes} min`, inline: true }, { name: "Salon", value: `<#${cfg.descamps.channel}>`, inline: true }] })], ephemeral: true });
-    }
-
-    if (sub === "tarnec") {
-      const actif      = interaction.options.getBoolean("actif");
-      const intervalle = interaction.options.getInteger("intervalle");
-      const salon      = interaction.options.getChannel("salon");
-      if (actif      !== null) cfg.tarnec.enabled          = actif;
-      if (intervalle !== null) cfg.tarnec.interval_minutes = Math.max(1, intervalle);
-      if (salon)               cfg.tarnec.channel          = salon.id;
-      saveConfig(cfg);
-      startTarnecBot();
-      return interaction.reply({ embeds: [makeEmbed({ color: 0x8E44AD, title: "✅ LeTarnec BOT mis à jour !", fields: [{ name: "Actif", value: cfg.tarnec.enabled ? "✅" : "❌", inline: true }, { name: "Intervalle", value: `${cfg.tarnec.interval_minutes} min`, inline: true }, { name: "Salon", value: `<#${cfg.tarnec.channel}>`, inline: true }, { name: "Thème", value: cfg.tarnec.theme, inline: true }] })], ephemeral: true });
-    }
-
-    if (sub === "statserveur") {
-      const actif      = interaction.options.getBoolean("actif");
-      const intervalle = interaction.options.getInteger("intervalle");
-      const salon      = interaction.options.getChannel("salon");
-      if (actif      !== null) cfg.statserveur_auto                 = actif;
-      if (intervalle !== null) cfg.statserveur_interval_minutes     = Math.max(5, intervalle);
-      if (salon)               cfg.statserveur_channel              = salon.id;
-      saveConfig(cfg);
-      startStatServeurAuto();
-      return interaction.reply({ embeds: [makeEmbed({ color: C.CYAN, title: "✅ StatServeur Auto mis à jour !", fields: [{ name: "Actif", value: cfg.statserveur_auto ? "✅" : "❌", inline: true }, { name: "Intervalle", value: `${cfg.statserveur_interval_minutes} min`, inline: true }, { name: "Salon", value: cfg.statserveur_channel ? `<#${cfg.statserveur_channel}>` : "*non défini*", inline: true }] })], ephemeral: true });
-    }
+    return interaction.reply({ embeds: [buildConfigMainEmbed(cfg)], components: [buildConfigMainRow()], ephemeral: true });
   }
 
 });
+
+// ============================================================
+//  HELPER — ServerInfo row
+// ============================================================
+
+function buildServerInfoRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("sinfo_membres").setLabel("👥 Membres").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("sinfo_salons").setLabel("💬 Salons").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("sinfo_roles").setLabel("🎭 Rôles").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("sinfo_boost").setLabel("🚀 Boosts").setStyle(ButtonStyle.Secondary),
+  );
+}
 
 // ============================================================
 //  HELPER — TOP avec pagination
@@ -1827,16 +2252,8 @@ async function handleTopPage(interaction, page, isUpdate) {
   });
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`top_page_${safePage - 1}`)
-      .setLabel("◀ Précédent")
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(safePage <= 1),
-    new ButtonBuilder()
-      .setCustomId(`top_page_${safePage + 1}`)
-      .setLabel("Suivant ▶")
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(safePage >= totalPages),
+    new ButtonBuilder().setCustomId(`top_page_${safePage - 1}`).setLabel("◀ Précédent").setStyle(ButtonStyle.Secondary).setDisabled(safePage <= 1),
+    new ButtonBuilder().setCustomId(`top_page_${safePage + 1}`).setLabel("Suivant ▶").setStyle(ButtonStyle.Secondary).setDisabled(safePage >= totalPages),
   );
 
   const payload = { embeds: [embed], components: [row] };
