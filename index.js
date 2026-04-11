@@ -9,7 +9,7 @@ const fs   = require("fs");
 const path = require("path");  
 const {
   Client, GatewayIntentBits, Partials,
-  EmbedBuilder, ButtonBuilder, ButtonStyle,
+  EmbedBuilder, ButtonBuilder, ButtonStyle,  
   ActionRowBuilder, SlashCommandBuilder,
   StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
   ModalBuilder, TextInputBuilder, TextInputStyle,
