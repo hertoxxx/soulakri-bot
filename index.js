@@ -3,8 +3,6 @@
 // ============================================================
 
 require("dotenv").config();
-const sodium = require("libsodium-wrappers");
-sodium.ready.then(() => console.log("[Audio] libsodium prêt ✅"));
 const fs   = require("fs");
 const path = require("path");  
 const {
@@ -16,6 +14,73 @@ const {
   REST, Routes, ChannelType, PermissionFlagsBits,
   AttachmentBuilder,
 } = require("discord.js");
+
+const sodium = require("libsodium-wrappers");
+sodium.ready.then(() => console.log("[Audio] libsodium prêt ✅"));
+
+const mongoose = require("mongoose");
+
+// Connexion MongoDB
+mongoose.connect(process.env.MONGODB_URI)
+  .then(() => console.log("✅ MongoDB connecté !"))
+  .catch(err => console.error("❌ MongoDB erreur :", err));
+
+// ── Schemas ──
+const XPSchema = new mongoose.Schema({
+  userId:   { type: String, required: true, unique: true },
+  xp:       { type: Number, default: 0 },
+  level:    { type: Number, default: 1 },
+  messages: { type: Number, default: 0 },
+});
+
+const WarnSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  warns:  { type: Array, default: [] },
+});
+
+const BlagueSchema = new mongoose.Schema({
+  joke:   String,
+  answer: String,
+});
+
+const BirthdaySchema = new mongoose.Schema({
+  userId: { type: String, required: true, unique: true },
+  date:   String,
+});
+
+const ConfigSchema = new mongoose.Schema({
+  guildId: { type: String, required: true, unique: true },
+  config:  { type: Object, default: {} },
+});
+
+const ObjectifSchema = new mongoose.Schema({
+  guildId:   { type: String, required: true, unique: true },
+  texte:     { type: String, default: "Aucun objectif défini." },
+  updatedBy: { type: String, default: null },
+  updatedAt: { type: Number, default: null },
+});
+
+const BedrockSchema = new mongoose.Schema({
+  guildId:   { type: String, required: true, unique: true },
+  ip:        { type: String, default: "" },
+  port:      { type: String, default: "" },
+  updatedAt: { type: Number, default: null },
+});
+
+const GiveawaySchema = new mongoose.Schema({
+  giveawayId: { type: String, required: true, unique: true },
+  data:       { type: Object, default: {} },
+});
+
+// ── Models ──
+const XPModel       = mongoose.model("XP",       XPSchema);
+const WarnModel     = mongoose.model("Warn",     WarnSchema);
+const BlagueModel   = mongoose.model("Blague",   BlagueSchema);
+const BirthdayModel = mongoose.model("Birthday", BirthdaySchema);
+const ConfigModel   = mongoose.model("Config",   ConfigSchema);
+const ObjectifModel = mongoose.model("Objectif", ObjectifSchema);
+const BedrockModel  = mongoose.model("Bedrock",  BedrockSchema);
+const GiveawayModel = mongoose.model("Giveaway", GiveawaySchema);
 
 // ============================================================
 //  CONFIG
